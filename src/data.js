@@ -104,6 +104,9 @@ export const api = {
     must(await sb.from('bet_viewers').delete().eq('bet_id', betId));
     if (visibility === 'selected' && viewers.length) must(await sb.from('bet_viewers').insert(viewers.map(user_id => ({ bet_id: betId, user_id }))));
   },
+  async updateBet(betId, fields) { must(await sb.from('bets').update(fields).eq('id', betId)); },
+  async deleteBet(betId) { must(await sb.from('bets').delete().eq('id', betId)); },
+  async updateGoal(betId, userId, goal) { must(await sb.from('participants').update({ goal }).match({ bet_id: betId, user_id: userId })); },
   async invite(betId, userIds) { must(await sb.from('bet_invites').upsert(userIds.map(user_id => ({ bet_id: betId, user_id })), { ignoreDuplicates: true })); },
   async declineInvite(betId, userId) { must(await sb.from('bet_invites').delete().match({ bet_id: betId, user_id: userId })); },
   async findUser(code) { return must(await sb.rpc('find_user', { p_code: code }))[0] || null; },
