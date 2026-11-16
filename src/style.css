@@ -152,3 +152,42 @@ nav .inner{padding-bottom:calc(10px + env(safe-area-inset-bottom))}
 .btn[disabled]{opacity:.5;pointer-events:none}
 .day.pre{opacity:.45}
 .day.na{background:transparent;box-shadow:inset 0 0 0 1px var(--line)}
+
+/* ---------- Handy-Layout: nichts darf breiter als der Bildschirm sein ---------- */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+html,body{width:100%;max-width:100%;overflow-x:hidden;overscroll-behavior:none}
+body{min-height:100dvh;-webkit-tap-highlight-color:transparent}
+@supports (overflow:clip){html,body{overflow-x:clip}}
+.app{width:100%;overflow-wrap:anywhere}
+.app,.modal,.card,.setgroup{min-width:0}
+img,svg,video{max-width:100%}
+/* iOS zoomt bei Eingabefeldern unter 16px automatisch hinein */
+input,textarea,select,.in,.cform .in{font-size:16px;max-width:100%;min-width:0}
+/* iOS gibt Datumsfeldern eine eigene Mindestbreite, die über den Rand ragt */
+input[type=date]{-webkit-appearance:none;appearance:none;display:block;width:100%;min-width:0;min-height:44px;text-align:left}
+input[type=time]{-webkit-appearance:none;appearance:none;min-width:0;min-height:38px;text-align:center}
+input[type=time]::-webkit-date-and-time-value{text-align:center}
+input[type=date]::-webkit-date-and-time-value{text-align:left;margin:0}
+input[type=date]::-webkit-calendar-picker-indicator{margin-left:auto}
+/* Flex-Kinder dürfen schrumpfen statt den Container zu sprengen */
+.row>*,.bettop>*,.prow>*,.feeditem>*,.cform>*,.hint>*{min-width:0}
+.cform .in{flex:1}
+.bettitle,.lbl,.goal{overflow-wrap:anywhere}
+.segctl button{min-width:0;white-space:normal;line-height:1.2}
+/* Leiste unten: fest am unteren Rand, kein Mitziehen beim Wischen */
+nav{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);transform:translateZ(0)}
+nav button{min-width:0}
+nav button span,nav button{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modal{max-height:85dvh;overscroll-behavior:contain;padding-bottom:calc(28px + env(safe-area-inset-bottom))}
+.auth{min-height:92dvh}
+.toast{bottom:calc(90px + env(safe-area-inset-bottom))}
+/* Sehr schmale Displays oder große Schrift (z. B. Anzeigezoom) */
+@media (max-width:360px){
+  .app{padding-left:12px;padding-right:12px}
+  .card{padding:14px}
+  nav .inner{padding-left:2px;padding-right:2px}
+  nav button{font-size:9.5px;padding:6px 0;letter-spacing:-.01em}
+  .stat b{font-size:16px}
+  .pool b{font-size:15px}
+  .board{grid-template-columns:1fr}
+}
