@@ -59,6 +59,18 @@ Die Schlüssel für Web Push (VAPID) erzeugt die Funktion beim ersten Aufruf sel
 
 In der App: **Einstellungen → Benachrichtigungen → Erlauben**, Uhrzeit wählen, mit „Test“ prüfen. Erinnert wird nur, wenn an dem Tag noch eine laufende Challenge offen ist. Auf dem iPhone geht das nur in der installierten App (Home-Bildschirm, iOS 16.4+).
 
+## Datenschutz, Nutzungsregeln
+
+Die Seiten liegen als einfache HTML-Dateien in `public/` (`datenschutz.html`, `nutzungsregeln.html`) und sind auch ohne Anmeldung erreichbar. Verlinkt sind sie auf dem Anmeldebildschirm, bei der Registrierung (Pflicht-Häkchen für Mindestalter und Regeln) und in den Einstellungen unter „Rechtliches“. Das Mindestalter steht in `src/main.js` (`MIN_AGE`) und in `nutzungsregeln.html`.
+
+„Konto löschen“ in den Einstellungen braucht `supabase/migrations/0006_konto_loeschen.sql` (einmal im SQL Editor ausführen).
+
+Die Schrift Inter wird über `@fontsource/inter` selbst ausgeliefert, nicht von Google Fonts.
+
+## Punkte
+
+Gesetzt wird mit Spielpunkten (`supabase/migrations/0007_punkte.sql`, einmal im SQL Editor ausführen). Jeder startet mit 1.000 Punkten; Einsatz wird beim Beitreten abgezogen; Abrechnung läuft auf dem Server (`settle_bet`), beim Laden der App für die eigenen Wetten und stündlich per pg_cron für alle. Solo-Challenges: bis zu 10 Punkte pro Tag, aufgeteilt auf alle laufenden Solo-Challenges. Überweisen nur an Freunde. Montags werden Konten unter 100 auf 100 aufgefüllt. Punkte kann man nicht kaufen oder auszahlen.
+
 ## Als App installieren
 
 - **Android/Chrome:** In der App erscheint ein „Installieren“-Hinweis.
