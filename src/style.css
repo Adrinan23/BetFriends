@@ -191,3 +191,4 @@ nav button span,nav button{overflow:hidden;text-overflow:ellipsis;white-space:no
   .pool b{font-size:15px}
   .board{grid-template-columns:1fr}
 }
+.editrow{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}

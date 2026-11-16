@@ -317,6 +317,9 @@ function viewBet() {
     <div class="sub" style="margin-top:10px;display:flex;justify-content:space-between;align-items:center">
       <span>Sichtbar für: <b style="font-weight:500;color:var(--ink)">${visLabel(b)}</b></span>
       ${b.creator === S.me ? `<button class="linkbtn" onclick="openVisibility('${b.id}')">Ändern</button>` : ''}</div>
+    ${b.creator === S.me || (me && b.type === 'challenge' && !b.sameGoal && ph !== 'done') ? `<div class="editrow">
+      ${me && b.type === 'challenge' && !b.sameGoal && ph !== 'done' ? `<button class="btn sec2 sm" onclick="openGoal('${b.id}')">Mein Ziel ändern</button>` : ''}
+      ${b.creator === S.me ? `<button class="btn sec2 sm" onclick="openEdit('${b.id}')">Wette bearbeiten</button>` : ''}</div>` : ''}
   </div>
   ${body}
   <div class="sec"><h2>Kommentare</h2><span class="sub">${(b.comments || []).length}</span></div>
@@ -356,6 +359,60 @@ function saveVisibility() {
   const v = visEdit; if (v.vis === 'selected' && !v.viewers.length) return toast('Wähl mindestens einen Freund aus');
   visEdit = null; modal('');
   run(() => api.setVisibility(v.betId, v.vis, v.viewers), 'Sichtbarkeit gespeichert');
+}
+/* ---------- Wette bearbeiten / löschen ---------- */
+const EMOS = { challenge: ['🔥', '👟', '🚭', '🍺', '💪', '🥗', '📵', '📚', '🧘', '💤'], tipp: ['⚽', '🍕', '🎮', '🏀', '🎤', '🎲', '🍻', '💘'] };
+let betEdit = null;
+function openEdit(betId) {
+  const b = B(betId); if (!b) return;
+  if (!betEdit || betEdit.betId !== betId) betEdit = { betId, title: b.title, desc: b.desc || '', emoji: b.emoji, stake: Number(b.stake) || 0, jokers: b.jokers, end: b.end, open: !b.end };
+  const e = betEdit, ch = b.type === 'challenge', minEnd = b.start > TODAY ? b.start : TODAY;
+  const emos = [...new Set([e.emoji, ...EMOS[b.type]])];
+  modal(`<h1>Wette bearbeiten</h1>
+    <label class="f">Titel</label><input class="in" maxlength="60" value="${esc(e.title)}" oninput="betEdit.title=this.value">
+    <label class="f">Symbol</label><div class="chips">${emos.map(x => `<button class="chip ${e.emoji === x ? 'on' : ''}" onclick="betEdit.emoji='${x}';openEdit('${betId}')">${x}</button>`).join('')}</div>
+    <label class="f">Beschreibung</label><input class="in" maxlength="200" placeholder="Regeln, Beweise …" value="${esc(e.desc)}" oninput="betEdit.desc=this.value">
+    <label class="f">Einsatz pro Person (€)</label><input class="in" type="number" inputmode="decimal" min="0" step="0.5" value="${e.stake}" oninput="betEdit.stake=Math.max(0,+this.value||0)">
+    ${ch ? `<label class="f">Ende</label>
+      <div class="chips"><button class="chip ${!e.open ? 'on' : ''}" onclick="betEdit.open=false;betEdit.end=betEdit.end||'${addDays(minEnd, 7)}';openEdit('${betId}')">Bis Datum</button><button class="chip ${e.open ? 'on' : ''}" onclick="betEdit.open=true;openEdit('${betId}')">Ohne Ende</button></div>
+      ${!e.open ? `<input class="in" style="margin-top:8px" type="date" min="${minEnd}" value="${e.end || ''}" onchange="betEdit.end=this.value">` : ''}
+      <label class="f">Joker (Tage, die man verpassen darf)</label><div class="chips">${[0, 1, 2, 3].map(n => `<button class="chip ${e.jokers === n ? 'on' : ''}" onclick="betEdit.jokers=${n};openEdit('${betId}')">${n}</button>`).join('')}</div>` : ''}
+    ${b.participants.length > 1 ? '<div class="note">Alle Mitspieler sehen die Änderungen sofort.</div>' : ''}
+    <div style="height:16px"></div>
+    <div class="row"><button class="btn sec2" onclick="betEdit=null;modal('')">Abbrechen</button><button class="btn" onclick="saveEdit()">Speichern</button></div>
+    <button class="btn sec2 full" style="margin-top:20px;color:var(--bad)" onclick="confirmDeleteBet('${betId}')">Wette löschen</button>`);
+}
+function saveEdit() {
+  const e = betEdit, b = B(e.betId);
+  if (!e.title.trim()) return toast('Gib der Wette einen Titel');
+  const fields = { title: e.title.trim(), descr: e.desc.trim(), emoji: e.emoji, stake: e.stake };
+  if (b.type === 'challenge') {
+    if (!e.open && !e.end) return toast('Wähl ein Enddatum');
+    if (!e.open && e.end < (b.start > TODAY ? b.start : TODAY)) return toast('Das Ende darf nicht in der Vergangenheit liegen');
+    fields.end_date = e.open ? null : e.end; fields.jokers = e.jokers;
+  }
+  betEdit = null; modal('');
+  run(() => api.updateBet(b.id, fields), 'Änderungen gespeichert');
+}
+function confirmDeleteBet(betId) {
+  const b = B(betId); betEdit = null;
+  modal(`<h1>Wette löschen?</h1><div class="sub">„${esc(b.title)}“ wird für alle${b.participants.length > 1 ? ` ${b.participants.length} Mitspieler` : ''} gelöscht, mit allen Häkchen und Kommentaren. Das lässt sich nicht rückgängig machen.</div><div style="height:16px"></div>
+    <div class="row"><button class="btn sec2" onclick="modal('')">Abbrechen</button><button class="btn" style="background:var(--bad);color:#fff" onclick="deleteBet('${betId}')">Löschen</button></div>`);
+}
+async function deleteBet(betId) {
+  modal('');
+  const ok = await run(() => api.deleteBet(betId).then(() => true), 'Wette gelöscht');
+  if (ok) go('home');
+}
+function openGoal(betId) {
+  const b = B(betId), me = b.participants.find(p => p.userId === S.me);
+  modal(`<h1>Mein Ziel</h1><div class="sub" style="margin-bottom:12px">${esc(b.title)}</div>
+    <input class="in" id="goal-in" maxlength="60" value="${esc(me?.goal || '')}">
+    <div style="height:16px"></div><div class="row"><button class="btn sec2" onclick="modal('')">Abbrechen</button><button class="btn" onclick="saveGoal('${betId}')">Speichern</button></div>`);
+}
+function saveGoal(betId) {
+  const g = $('#goal-in').value.trim(); if (!g) return toast('Trag ein Ziel ein');
+  modal(''); run(() => api.updateGoal(betId, S.me, g), 'Ziel gespeichert');
 }
 let inviteSel = [];
 function openInvite(betId) {
@@ -781,12 +838,14 @@ function render() {
 Object.assign(window, {
   go, render, setStart, checkAll, toggleCheck, refreshPicker, toggleViewer, openVisibility, saveVisibility, openInvite, sendInvites,
   declineInvite, openInviteJoin, onFriendCode, addFriend, acceptFriend, removeFriendship, confirmRemove, shareFriendCode, react, toggleThread, addComment, delComment, copyCode, setD, createBet, onCodeInput, joinBet,
+  openEdit, saveEdit, confirmDeleteBet, deleteBet, openGoal, saveGoal,
   modal, openPick, setPick, openResolve, resolveBet, setSet, setProfile, setTheme, openRules, openLogout, openPassword, savePassword,
   setAuth, submitAuth, doInstall, sb,
 });
 Object.defineProperty(window, 'draft', { get: () => draft });
 Object.defineProperty(window, 'joinState', { get: () => joinState });
 Object.defineProperty(window, 'visEdit', { get: () => visEdit, set: v => { visEdit = v; } });
+Object.defineProperty(window, 'betEdit', { get: () => betEdit, set: v => { betEdit = v; } });
 Object.defineProperty(window, 'inviteSel', { get: () => inviteSel, set: v => { inviteSel = v; } });
 
 /* ===================== Start ===================== */
