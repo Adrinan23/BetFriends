@@ -700,10 +700,14 @@ function viewSettings() {
     <div class="sub" style="margin-top:8px">„System“ übernimmt automatisch die Einstellung deines Geräts.</div>
   </div></div>
 
-  <div class="sec"><h2>Benachrichtigungen</h2><span class="sub">bald verfügbar</span></div>
+  <div class="sec"><h2>Benachrichtigungen</h2></div>
   <div class="setgroup">
+    ${pushRow()}
     ${tog('notifDaily', 'Tägliche Erinnerung', 'Erinnert dich, wenn du heute noch nicht abgehakt hast')}
     ${st.notifDaily ? `<div class="setrow"><div class="lbl">Uhrzeit</div><input class="in" type="time" style="width:auto;flex:none;padding:6px 10px" value="${st.reminder}" onchange="setSet('reminder',this.value)"></div>` : ''}
+  </div>
+  <div class="sec"><h2>Weitere Benachrichtigungen</h2><span class="sub">bald verfügbar</span></div>
+  <div class="setgroup">
     ${tog('notifComments', 'Kommentare', 'Wenn jemand deine Wetten oder Fortschritte kommentiert')}
     ${tog('notifReacts', 'Reaktionen', 'Emojis auf deine Fortschritte')}
     ${tog('notifNewBets', 'Neue Wetten von Freunden')}
@@ -746,9 +750,73 @@ function openRules() {
     <div class="card"><h2>Geld</h2><p class="sub" style="margin-top:4px">Die App zeigt nur an, wer wie viel setzt. Bezahlt wird unter euch.</p></div>
     <button class="btn full" onclick="modal('')">Verstanden</button>`);
 }
+/* ---------- Push-Benachrichtigungen ---------- */
+// state: unsupported | ios-install | denied | off | on | busy
+let push = { state: 'unknown', endpoint: null };
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+async function pushReg() { return navigator.serviceWorker.getRegistration('/').then(r => r || navigator.serviceWorker.register('/sw.js')); }
+async function checkPush(rerender = true) {
+  let st;
+  if (!pushSupported()) st = isIOS() && !standalone() ? 'ios-install' : 'unsupported';
+  else if (Notification.permission === 'denied') st = 'denied';
+  else {
+    const sub = await pushReg().then(r => r.pushManager.getSubscription()).catch(() => null);
+    push.endpoint = sub?.endpoint || null;
+    st = sub && Notification.permission === 'granted' ? 'on' : 'off';
+    if (sub && st === 'on') api.savePushSub(sub).catch(() => {}); // Zeitzone/Nutzer aktuell halten
+  }
+  const changed = st !== push.state; push.state = st;
+  if (changed && rerender && view.name === 'settings') render();
+}
+const b64ToBytes = b64 => { const s = atob((b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(s, c => c.charCodeAt(0)); };
+async function enablePush() {
+  if (push.state === 'busy') return;
+  push.state = 'busy'; render();
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { push.state = perm === 'denied' ? 'denied' : 'off'; render(); return toast('Benachrichtigungen wurden nicht erlaubt'); }
+    const reg = await pushReg();
+    const key = await api.pushKey();
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key) });
+    await api.savePushSub(sub);
+    push = { state: 'on', endpoint: sub.endpoint };
+    if (!getSet().notifDaily) setSet('notifDaily', true); else render();
+    toast('Benachrichtigungen sind an');
+  } catch (e) { console.error(e); push.state = 'off'; render(); toast('Das hat nicht geklappt: ' + niceError(e)); }
+}
+async function disablePush() {
+  try {
+    const sub = await pushReg().then(r => r.pushManager.getSubscription());
+    if (sub) { await api.deletePushSub(sub.endpoint).catch(() => {}); await sub.unsubscribe(); }
+  } catch (e) { console.error(e); }
+  push = { state: 'off', endpoint: null }; render(); toast('Auf diesem Gerät ausgeschaltet');
+}
+async function testPush() {
+  try { const n = await api.testPush(); toast(n ? 'Test gesendet, kommt gleich an' : 'Kein Gerät gefunden, bitte neu einschalten'); }
+  catch (e) { console.error(e); toast('Test fehlgeschlagen: ' + niceError(e)); }
+}
+function pushRow() {
+  if (push.state === 'unknown') checkPush();
+  const row = (lbl, small, btn = '') => `<div class="setrow"><div class="lbl">${lbl}<small>${small}</small></div>${btn}</div>`;
+  switch (push.state) {
+    case 'on': return row('Auf diesem Gerät aktiv', 'Du bekommst die Erinnerung auf dieses Gerät', `<button class="btn sec2 sm" onclick="testPush()">Test</button><button class="cbtn" onclick="disablePush()">Aus</button>`);
+    case 'ios-install': return row('Erst zum Home-Bildschirm hinzufügen', 'Auf dem iPhone gibt es Benachrichtigungen nur in der installierten App: in Safari „Teilen“ → „Zum Home-Bildschirm“, dann die App von dort öffnen.');
+    case 'unsupported': return row('Nicht verfügbar', 'Dieser Browser unterstützt keine Benachrichtigungen.');
+    case 'denied': return row('Blockiert', isIOS() ? 'In den iPhone-Einstellungen unter Mitteilungen → BetFriends erlauben.' : 'In den Browser- bzw. Handy-Einstellungen für diese Seite erlauben.');
+    case 'busy': return row('Einen Moment …', 'Benachrichtigungen werden eingerichtet');
+    default: return row('Benachrichtigungen erlauben', 'Damit die Erinnerung auf diesem Gerät ankommt', `<button class="btn sm" onclick="enablePush()">Erlauben</button>`);
+  }
+}
+async function logout() {
+  modal('');
+  try { const sub = pushSupported() && await pushReg().then(r => r.pushManager.getSubscription()); if (sub) { await api.deletePushSub(sub.endpoint).catch(() => {}); await sub.unsubscribe(); } } catch {}
+  push = { state: 'unknown', endpoint: null };
+  sb.auth.signOut();
+}
 function openLogout() {
   modal(`<h1>Abmelden?</h1><div class="sub">Deine Wetten bleiben gespeichert. Du kannst dich jederzeit wieder anmelden.</div><div style="height:16px"></div>
-    <div class="row"><button class="btn sec2" onclick="modal('')">Abbrechen</button><button class="btn" style="background:var(--bad);color:#fff" onclick="modal('');sb.auth.signOut()">Abmelden</button></div>`);
+    <div class="row"><button class="btn sec2" onclick="modal('')">Abbrechen</button><button class="btn" style="background:var(--bad);color:#fff" onclick="logout()">Abmelden</button></div>`);
 }
 function openPassword(recovery = false) {
   modal(`<h1>${recovery ? 'Neues Passwort festlegen' : 'Passwort ändern'}</h1>
@@ -838,6 +906,7 @@ function render() {
 Object.assign(window, {
   go, render, setStart, checkAll, toggleCheck, refreshPicker, toggleViewer, openVisibility, saveVisibility, openInvite, sendInvites,
   declineInvite, openInviteJoin, onFriendCode, addFriend, acceptFriend, removeFriendship, confirmRemove, shareFriendCode, react, toggleThread, addComment, delComment, copyCode, setD, createBet, onCodeInput, joinBet,
+  enablePush, disablePush, testPush, logout,
   openEdit, saveEdit, confirmDeleteBet, deleteBet, openGoal, saveGoal,
   modal, openPick, setPick, openResolve, resolveBet, setSet, setProfile, setTheme, openRules, openLogout, openPassword, savePassword,
   setAuth, submitAuth, doInstall, sb,

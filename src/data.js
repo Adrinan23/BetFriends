@@ -62,6 +62,23 @@ export async function loadState(meId) {
 
 // ---------- Aktionen ----------
 export const api = {
+  // ---- Push-Benachrichtigungen ----
+  async pushKey() {
+    const { data, error } = await sb.functions.invoke('push', { body: { action: 'key' } });
+    if (error || !data?.publicKey) throw error || new Error('Push-Server nicht erreichbar');
+    return data.publicKey;
+  },
+  async savePushSub(sub) {
+    const j = sub.toJSON();
+    must(await sb.rpc('save_push_subscription', { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth, p_tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Berlin' }));
+  },
+  async deletePushSub(endpoint) { must(await sb.from('push_subscriptions').delete().eq('endpoint', endpoint)); },
+  async testPush() {
+    const { data, error } = await sb.functions.invoke('push', { body: { action: 'test' } });
+    if (error) throw error;
+    return data?.sent || 0;
+  },
+
   async check(betId, userId, day) {
     must(await sb.from('checks').insert({ bet_id: betId, user_id: userId, day }));
     must(await sb.from('feed').insert({ bet_id: betId, user_id: userId, kind: 'check' }));
