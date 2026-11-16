@@ -1,3 +1,7 @@
+import '@fontsource/inter/latin-400.css';
+import '@fontsource/inter/latin-500.css';
+import '@fontsource/inter/latin-600.css';
+import '@fontsource/inter/latin-700.css';
 import './style.css';
 import { configured, sb, loadState, api, subscribe } from './data.js';
 
@@ -10,6 +14,7 @@ const parse = s => { const [y, m, d] = s.split('-').map(Number); return new Date
 const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return ds(d); };
 const diffDays = (a, b) => Math.round((parse(b) - parse(a)) / 86400000);
 let TODAY = ds(new Date());
+const MIN_AGE = 18; // Mindestalter, muss zu den Nutzungsregeln passen
 const fmtDate = s => parse(s).toLocaleDateString('de-DE', { day: 'numeric', month: 'short' });
 const euro = n => (Math.round(n * 100) / 100).toLocaleString('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: n % 1 ? 2 : 0 });
 const ago = ts => {
@@ -739,6 +744,14 @@ function viewSettings() {
   <div class="setgroup">
     <button class="setrow" onclick="openPassword()"><div class="lbl">Passwort ändern</div><span class="sub">›</span></button>
     <button class="setrow danger" onclick="openLogout()"><div class="lbl">Abmelden</div></button>
+    <button class="setrow danger" onclick="openDeleteAccount()"><div class="lbl">Konto löschen</div></button>
+  </div>
+
+  <div class="sec"><h2>Rechtliches</h2></div>
+  <div class="setgroup">
+    <a class="setrow" href="/nutzungsregeln.html"><div class="lbl">Nutzungsregeln</div><span class="sub">›</span></a>
+    <a class="setrow" href="/datenschutz.html"><div class="lbl">Datenschutz</div><span class="sub">›</span></a>
+    <a class="setrow" href="/impressum.html"><div class="lbl">Impressum</div><span class="sub">›</span></a>
   </div>`;
 }
 function openRules() {
@@ -747,7 +760,7 @@ function openRules() {
     <div class="card"><h2>Challenge ohne Ende</h2><p class="sub" style="margin-top:4px">Läuft, bis nur noch einer übrig ist. Wer als Letzter durchhält, gewinnt den Pott.</p></div>
     <div class="card"><h2>Tipp-Wette</h2><p class="sub" style="margin-top:4px">Jeder gibt einen Tipp ab. Wer die Wette erstellt hat, trägt das Ergebnis ein. Alle mit dem richtigen Tipp teilen sich den Pott.</p></div>
     <div class="card"><h2>Abhaken</h2><p class="sub" style="margin-top:4px">Abhaken geht nur für heute. Wer einen Tag vergisst, verbraucht einen Joker.</p></div>
-    <div class="card"><h2>Geld</h2><p class="sub" style="margin-top:4px">Die App zeigt nur an, wer wie viel setzt. Bezahlt wird unter euch.</p></div>
+    <div class="card"><h2>Geld</h2><p class="sub" style="margin-top:4px">Die App zeigt nur an, wer wie viel setzt. Sie nimmt kein Geld an und zahlt nichts aus. Bezahlt wird freiwillig unter euch, einklagbar ist eine Wette nicht.</p></div>
     <button class="btn full" onclick="modal('')">Verstanden</button>`);
 }
 /* ---------- Push-Benachrichtigungen ---------- */
@@ -818,6 +831,23 @@ function openLogout() {
   modal(`<h1>Abmelden?</h1><div class="sub">Deine Wetten bleiben gespeichert. Du kannst dich jederzeit wieder anmelden.</div><div style="height:16px"></div>
     <div class="row"><button class="btn sec2" onclick="modal('')">Abbrechen</button><button class="btn" style="background:var(--bad);color:#fff" onclick="logout()">Abmelden</button></div>`);
 }
+function openDeleteAccount() {
+  modal(`<h1>Konto löschen?</h1>
+    <div class="sub">Dein Profil, deine Teilnahmen, Häkchen, Kommentare, Reaktionen und Freundschaften werden endgültig gelöscht. Wetten, die du erstellt hast, verschwinden auch für alle anderen. Das kann nicht rückgängig gemacht werden.</div>
+    <input class="in" id="delconfirm" placeholder="Zum Bestätigen LÖSCHEN eintippen" autocomplete="off" style="margin-top:14px" oninput="document.getElementById('delbtn').disabled = this.value.trim().toUpperCase() !== 'LÖSCHEN'">
+    <div style="height:12px"></div>
+    <div class="row"><button class="btn sec2" onclick="modal('')">Abbrechen</button><button class="btn" id="delbtn" disabled style="background:var(--bad);color:#fff" onclick="deleteAccount()">Endgültig löschen</button></div>`);
+}
+async function deleteAccount() {
+  const btn = document.getElementById('delbtn'); if (btn) btn.disabled = true;
+  try {
+    try { const sub = pushSupported() && await pushReg().then(r => r.pushManager.getSubscription()); if (sub) await sub.unsubscribe(); } catch {}
+    await api.deleteAccount();
+    modal(''); push = { state: 'unknown', endpoint: null };
+    await sb.auth.signOut().catch(() => {});
+    toast('Dein Konto wurde gelöscht');
+  } catch (e) { console.error(e); if (btn) btn.disabled = false; toast('Das hat nicht geklappt: ' + niceError(e)); }
+}
 function openPassword(recovery = false) {
   modal(`<h1>${recovery ? 'Neues Passwort festlegen' : 'Passwort ändern'}</h1>
     <form onsubmit="savePassword(event)"><input class="in" type="password" name="pw" minlength="6" placeholder="Neues Passwort (mind. 6 Zeichen)" autocomplete="new-password" required style="margin-top:12px">
@@ -841,6 +871,7 @@ function viewAuth() {
       ${m === 'register' ? `<input class="in" name="name" maxlength="20" placeholder="Dein Name" autocomplete="nickname" required>` : ''}
       <input class="in" name="email" type="email" placeholder="E-Mail" autocomplete="email" value="${esc(auth.email || '')}" required>
       ${m !== 'reset' ? `<input class="in" name="pw" type="password" minlength="6" placeholder="Passwort${m === 'register' ? ' (mind. 6 Zeichen)' : ''}" autocomplete="${m === 'register' ? 'new-password' : 'current-password'}" required>` : ''}
+      ${m === 'register' ? `<label class="consent"><input type="checkbox" name="consent" required><span>Ich bin mindestens ${MIN_AGE} Jahre alt und akzeptiere die <a href="/nutzungsregeln.html">Nutzungsregeln</a>. Die <a href="/datenschutz.html">Datenschutzerklärung</a> habe ich gelesen.</span></label>` : ''}
       ${auth.err ? `<div class="err">${esc(auth.err)}</div>` : ''}
       <div style="height:14px"></div>
       <button class="btn full" ${busy ? 'disabled' : ''}>${m === 'login' ? 'Anmelden' : m === 'register' ? 'Konto erstellen' : 'Link zum Zurücksetzen schicken'}</button>
@@ -849,6 +880,7 @@ function viewAuth() {
       ${m === 'login' ? `<button class="linkbtn" onclick="setAuth('register')">Neu hier? Konto erstellen</button><button class="linkbtn" onclick="setAuth('reset')">Passwort vergessen?</button>`
         : `<button class="linkbtn" onclick="setAuth('login')">← Zur Anmeldung</button>`}
     </div>
+    <div class="legalfoot"><a href="/impressum.html">Impressum</a><a href="/datenschutz.html">Datenschutz</a><a href="/nutzungsregeln.html">Nutzungsregeln</a></div>
   </div>`;
 }
 function setAuth(mode) { auth = { mode, msg: '', err: '', email: auth.email }; render(); }
@@ -862,7 +894,7 @@ async function submitAuth(ev) {
       const { error } = await sb.auth.signInWithPassword({ email, password: f.pw.value });
       if (error) throw error;
     } else if (auth.mode === 'register') {
-      const { data, error } = await sb.auth.signUp({ email, password: f.pw.value, options: { data: { name: f.name.value.trim() }, emailRedirectTo: location.origin } });
+      const { data, error } = await sb.auth.signUp({ email, password: f.pw.value, options: { data: { name: f.name.value.trim(), accepted_terms_at: new Date().toISOString(), min_age_confirmed: MIN_AGE }, emailRedirectTo: location.origin } });
       if (error) throw error;
       if (!data.session) auth.msg = `<b>Fast geschafft!</b><div class="sub" style="margin-top:4px">Wir haben dir eine E-Mail an ${esc(email)} geschickt. Klick auf den Link darin und melde dich dann hier an.</div>`;
     } else {
@@ -906,7 +938,7 @@ function render() {
 Object.assign(window, {
   go, render, setStart, checkAll, toggleCheck, refreshPicker, toggleViewer, openVisibility, saveVisibility, openInvite, sendInvites,
   declineInvite, openInviteJoin, onFriendCode, addFriend, acceptFriend, removeFriendship, confirmRemove, shareFriendCode, react, toggleThread, addComment, delComment, copyCode, setD, createBet, onCodeInput, joinBet,
-  enablePush, disablePush, testPush, logout,
+  enablePush, disablePush, testPush, logout, openDeleteAccount, deleteAccount,
   openEdit, saveEdit, confirmDeleteBet, deleteBet, openGoal, saveGoal,
   modal, openPick, setPick, openResolve, resolveBet, setSet, setProfile, setTheme, openRules, openLogout, openPassword, savePassword,
   setAuth, submitAuth, doInstall, sb,

@@ -192,3 +192,11 @@ nav button span,nav button{overflow:hidden;text-overflow:ellipsis;white-space:no
   .board{grid-template-columns:1fr}
 }
 .editrow{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+
+/* Rechtliches */
+a.setrow{color:inherit;text-decoration:none}
+.consent{display:flex;gap:10px;align-items:flex-start;margin-top:12px;font-size:13px;color:var(--muted);line-height:1.4;text-align:left}
+.consent input{width:18px;height:18px;flex:none;margin-top:1px;accent-color:var(--acc)}
+.consent a,.legalfoot a{color:var(--acc)}
+.legalfoot{display:flex;justify-content:center;gap:16px;flex-wrap:wrap;margin-top:28px;font-size:12px}
+.legalfoot a{color:var(--muted);text-decoration:none}

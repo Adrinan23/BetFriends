@@ -131,6 +131,7 @@ export const api = {
   async acceptFriend(fid) { must(await sb.rpc('accept_friend', { p_id: fid })); },
   async removeFriendship(fid) { must(await sb.from('friendships').delete().eq('id', fid)); },
   async updateProfile(id, fields) { must(await sb.from('profiles').update(fields).eq('id', id)); },
+  async deleteAccount() { must(await sb.rpc('delete_my_account')); },
 };
 
 function makeCode() {
