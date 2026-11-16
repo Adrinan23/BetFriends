@@ -71,7 +71,7 @@ const dayIndex = b => { const n = Math.max(0, diffDays(b.start, TODAY) + 1); ret
 const period = b => b.end ? (b.start === b.end ? fmtDate(b.start) : fmtDate(b.start) + ' – ' + fmtDate(b.end)) : (b.type === 'tipp' ? 'ohne festes Datum' : 'seit ' + fmtDate(b.start) + ' · ohne Enddatum');
 
 /* ===================== Einstellungen ===================== */
-const DEF_SET = { notifDaily: true, reminder: '20:00', notifComments: true, notifReacts: true, notifNewBets: true, weekly: false, public: true, defStake: 10, defJokers: 1 };
+const DEF_SET = { notifDaily: true, reminder: '20:00', notifComments: true, notifReacts: true, notifNewBets: true, weekly: false, defVis: 'friends', defStake: 10, defJokers: 1 };
 const getSet = (id = S.me) => ({ ...DEF_SET, ...(U(id).settings || {}) });
 const mq = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
 function applyTheme() {
@@ -238,8 +238,11 @@ function viewHome() {
   const left = todos.filter(x => !x.p.checks[TODAY]).length;
   return `
   <h1>Hallo ${esc(U(S.me).name)}</h1>
-  <div class="sub">${active.length} laufende Wetten · ${euro(active.reduce((s, b) => s + b.stake, 0))} Einsatz von dir</div>
+  <div class="sub">${active.length} laufende Wette${active.length === 1 ? "" : "n"} · ${euro(active.reduce((s, b) => s + b.stake, 0))} Einsatz von dir</div>
   ${installHint()}
+  ${myInvites().map(i => { const b = B(i.betId); return `<div class="card hint" style="align-items:center"><div class="ico">${esc(b.emoji)}</div>
+    <div style="flex:1;min-width:0"><b style="font-weight:600">${esc(U(i.by).name)} lädt dich ein</b><div class="sub">${esc(b.title)} · ${euro(b.stake)}</div></div>
+    <button class="btn sm" onclick="openInviteJoin('${b.code}')">Ansehen</button><button class="btn sec2 sm" aria-label="Ablehnen" onclick="declineInvite('${b.id}')">✕</button></div>`; }).join('')}
   ${todos.length ? `<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
       <h2>Heute</h2><div style="display:flex;gap:6px;align-items:center">${left > 1 ? `<button class="btn sec2 sm" onclick="checkAll()">Alle abhaken</button>` : ''}<span class="tag ${left ? 'warn' : 'ok'}">${left ? left + ' offen' : 'Alles erledigt'}</span></div></div>
@@ -306,7 +309,11 @@ function viewBet() {
       <div class="stat"><b>${euro(b.stake)}</b><span class="sub">Einsatz</span></div>
       <div class="stat"><b>${b.participants.length}</b><span class="sub">dabei</span></div>
     </div>
-    ${ph !== 'done' ? `<div class="codebox"><div><div class="sub">Einladungscode</div><code>${esc(b.code)}</code></div><button class="btn sec2 sm" onclick="copyCode('${b.code}')">Einladen</button></div>` : ''}
+    ${ph !== 'done' ? `<div class="codebox"><div><div class="sub">Einladungscode</div><code>${esc(b.code)}</code></div><button class="btn sec2 sm" onclick="copyCode('${b.code}')">Link teilen</button></div>` : ''}
+    ${ph !== 'done' && me && S.friends.length ? `<button class="btn sec2 full" style="margin-top:8px" onclick="openInvite('${b.id}')">Freunde einladen</button>` : ''}
+    <div class="sub" style="margin-top:10px;display:flex;justify-content:space-between;align-items:center">
+      <span>Sichtbar für: <b style="font-weight:500;color:var(--ink)">${visLabel(b)}</b></span>
+      ${b.creator === S.me ? `<button class="linkbtn" onclick="openVisibility('${b.id}')">Ändern</button>` : ''}</div>
   </div>
   ${body}
   <div class="sec"><h2>Kommentare</h2><span class="sub">${(b.comments || []).length}</span></div>
@@ -315,13 +322,132 @@ function viewBet() {
   <div class="note">Die App zeigt nur an, wer wie viel setzt. Bezahlt wird unter euch.</div>`;
 }
 
+/* ---------- Freunde & Sichtbarkeit ---------- */
+const VIS = [['friends', 'Alle Freunde'], ['selected', 'Ausgewählte'], ['none', 'Nur Mitspieler']];
+function visLabel(b) {
+  if (b.visibility === 'none') return 'nur Mitspieler';
+  if (b.visibility === 'selected') return b.creator === S.me ? (b.viewers.length ? names(b.viewers) : 'niemand ausgewählt') : 'ausgewählte Freunde';
+  return 'alle Freunde';
+}
+// Auswahl "wer sieht die Wette"; target = 'draft' oder 'visEdit'
+function visPicker(vis, viewers, target) {
+  return `<div class="segctl">${VIS.map(([v, l]) => `<button class="${vis === v ? 'on' : ''}" onclick="${target}.vis='${v}';refreshPicker('${target}')">${l}</button>`).join('')}</div>
+  <div class="sub" style="margin-top:6px">${vis === 'friends' ? 'Alle deine Freunde sehen die Wette im Community Board.' : vis === 'selected' ? 'Nur die angehakten Freunde sehen sie.' : 'Nur wer mitmacht (oder eingeladen ist) sieht die Wette.'}</div>
+  ${vis === 'selected' ? (S.friends.length ? `<div class="setgroup" style="margin-top:8px">${S.friends.map(f => `<button class="setrow" onclick="toggleViewer('${target}','${f.userId}')">${av(f.userId, 'sm')}<div class="lbl">${esc(U(f.userId).name)}</div>${sw(viewers.includes(f.userId))}</button>`).join('')}</div>`
+    : `<div class="note">Du hast noch keine Freunde. <button class="linkbtn" onclick="go('friends')">Freunde hinzufügen</button></div>`) : ''}`;
+}
+let visEdit = null;
+function refreshPicker(target) { target === 'visEdit' ? openVisibility(visEdit.betId) : render(); }
+function toggleViewer(target, id) {
+  const o = target === 'draft' ? draft : visEdit;
+  o.viewers = o.viewers.includes(id) ? o.viewers.filter(x => x !== id) : [...o.viewers, id];
+  refreshPicker(target);
+}
+function openVisibility(betId) {
+  const b = B(betId);
+  if (!visEdit || visEdit.betId !== betId) visEdit = { betId, vis: b.visibility, viewers: [...b.viewers] };
+  modal(`<h1>Wer sieht die Wette?</h1><div class="sub" style="margin-bottom:12px">${esc(b.title)}</div>${visPicker(visEdit.vis, visEdit.viewers, 'visEdit')}
+    <div style="height:16px"></div><div class="row"><button class="btn sec2" onclick="visEdit=null;modal('')">Abbrechen</button><button class="btn" onclick="saveVisibility()">Speichern</button></div>`);
+}
+function saveVisibility() {
+  const v = visEdit; if (v.vis === 'selected' && !v.viewers.length) return toast('Wähl mindestens einen Freund aus');
+  visEdit = null; modal('');
+  run(() => api.setVisibility(v.betId, v.vis, v.viewers), 'Sichtbarkeit gespeichert');
+}
+let inviteSel = [];
+function openInvite(betId) {
+  const b = B(betId);
+  const taken = new Set([...b.participants.map(p => p.userId), ...S.invites.filter(i => i.betId === betId).map(i => i.userId)]);
+  const list = S.friends.filter(f => !taken.has(f.userId));
+  modal(`<h1>Freunde einladen</h1><div class="sub" style="margin-bottom:12px">${esc(b.title)}. Sie sehen die Einladung auf ihrer Startseite.</div>
+    ${list.length ? `<div class="setgroup">${list.map(f => `<button class="setrow" onclick="inviteSel=inviteSel.includes('${f.userId}')?inviteSel.filter(x=>x!=='${f.userId}'):[...inviteSel,'${f.userId}'];openInvite('${betId}')">${av(f.userId, 'sm')}<div class="lbl">${esc(U(f.userId).name)}</div>${sw(inviteSel.includes(f.userId))}</button>`).join('')}</div>`
+      : '<div class="note">Alle deine Freunde sind schon dabei oder eingeladen.</div>'}
+    <div style="height:16px"></div><div class="row"><button class="btn sec2" onclick="inviteSel=[];modal('')">Abbrechen</button>${list.length ? `<button class="btn" onclick="sendInvites('${betId}')">Einladen${inviteSel.length ? ' (' + inviteSel.length + ')' : ''}</button>` : ''}</div>`);
+}
+function sendInvites(betId) {
+  if (!inviteSel.length) return toast('Wähl mindestens einen Freund aus');
+  const ids = inviteSel; inviteSel = []; modal('');
+  run(() => api.invite(betId, ids), ids.length === 1 ? 'Einladung verschickt' : `${ids.length} Einladungen verschickt`);
+}
+const myInvites = () => S.invites.filter(i => i.userId === S.me && B(i.betId) && !isMine(B(i.betId)) && betPhase(B(i.betId)) !== 'done');
+function declineInvite(betId) { run(() => api.declineInvite(betId, S.me), 'Einladung abgelehnt'); }
+function openInviteJoin(code) { joinState.code = code; joinState.found = null; go('join'); lookup(code); }
+
+let friendState = { code: '', found: null, looking: false, notFound: false };
+function onFriendCode(v) {
+  friendState.code = v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  friendState.found = null; friendState.notFound = false;
+  if (friendState.code.length === 6) lookupFriend(friendState.code);
+  render();
+  const i = document.querySelector('.friendin'); i.focus(); i.setSelectionRange(99, 99);
+}
+async function lookupFriend(code) {
+  friendState.looking = true;
+  try { const f = await api.findUser(code); if (friendState.code !== code) return; friendState.found = f; friendState.notFound = !f; }
+  catch (e) { toast(niceError(e)); }
+  finally { friendState.looking = false; render(); }
+}
+async function addFriend() {
+  const r = await run(() => api.addFriend(friendState.code));
+  if (!r) return;
+  toast(r === 'friends' ? 'Ihr seid jetzt Freunde' : 'Anfrage verschickt');
+  friendState = { code: '', found: null, looking: false, notFound: false }; render();
+}
+function acceptFriend(fid) { run(() => api.acceptFriend(fid), 'Ihr seid jetzt Freunde'); }
+function removeFriendship(fid, msg) { modal(''); run(() => api.removeFriendship(fid), msg); }
+function confirmRemove(fid, uid) {
+  modal(`<h1>${esc(U(uid).name)} entfernen?</h1><div class="sub">Ihr seht dann gegenseitig nur noch Wetten, bei denen ihr beide mitmacht.</div><div style="height:16px"></div>
+    <div class="row"><button class="btn sec2" onclick="modal('')">Abbrechen</button><button class="btn" style="background:var(--bad);color:#fff" onclick="removeFriendship('${fid}','Freund entfernt')">Entfernen</button></div>`);
+}
+function shareFriendCode() {
+  const text = `Füg mich auf BetFriends als Freund hinzu! Mein Code: ${S.myCode}\n${location.origin}/?friend=${S.myCode}`;
+  if (navigator.share) navigator.share({ title: 'BetFriends', text }).catch(() => {});
+  else navigator.clipboard?.writeText(text).then(() => toast('Link kopiert'), () => toast('Code: ' + S.myCode));
+}
+function viewFriends() {
+  const f = friendState.found;
+  const st = f && { self: 'Das bist du.', friends: 'Ihr seid schon Freunde.', sent: 'Anfrage ist schon verschickt.', received: '' }[f.status];
+  return `<button class="back" onclick="go('board')">← Community</button>
+  <h1>Freunde</h1><div class="sub">Freunde sehen die Wetten, die du für sie freigibst.</div>
+  <div class="card">
+    <div class="sub">Dein Freundescode</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
+      <code style="font-family:ui-monospace,Menlo,monospace;font-size:22px;letter-spacing:.15em;font-weight:600">${esc(S.myCode)}</code>
+      <button class="btn sm" onclick="shareFriendCode()">Teilen</button></div>
+  </div>
+  <div class="sec"><h2>Freund hinzufügen</h2></div>
+  <div class="card">
+    <input class="in friendin" style="font-family:ui-monospace,Menlo,monospace;font-size:18px;text-align:center;letter-spacing:.25em;text-transform:uppercase" maxlength="6" placeholder="FREUNDESCODE" autocapitalize="characters" autocomplete="off" value="${esc(friendState.code)}" oninput="onFriendCode(this.value)">
+    ${friendState.looking ? '<div class="note">Suche …</div>' : ''}
+    ${friendState.notFound ? '<div class="note">Diesen Code gibt es nicht.</div>' : ''}
+    ${f ? `<div class="prow" style="margin-top:12px;align-items:center"><span class="av" style="background:${esc(f.color)}">${esc((f.name[0] || '?').toUpperCase())}</span>
+      <div style="flex:1"><b style="font-weight:600">${esc(f.name)}</b>${st ? `<div class="sub">${st}</div>` : ''}</div>
+      ${f.status === 'none' ? `<button class="btn sm" onclick="addFriend()">Anfrage senden</button>` : f.status === 'received' ? `<button class="btn sm" onclick="addFriend()">Annehmen</button>` : ''}</div>` : ''}
+  </div>
+  ${S.incoming.length ? `<div class="sec"><h2>Anfragen</h2><span class="sub">${S.incoming.length}</span></div><div class="setgroup">
+    ${S.incoming.map(r => `<div class="setrow">${av(r.userId)}<div class="lbl"><b style="font-weight:600">${esc(U(r.userId).name)}</b><small>möchte mit dir befreundet sein</small></div>
+      <button class="btn sm" onclick="acceptFriend('${r.fid}')">Annehmen</button><button class="btn sec2 sm" onclick="removeFriendship('${r.fid}','Anfrage abgelehnt')">✕</button></div>`).join('')}</div>` : ''}
+  <div class="sec"><h2>Deine Freunde</h2><span class="sub">${S.friends.length}</span></div>
+  ${S.friends.length ? `<div class="setgroup">${S.friends.map(fr => `<div class="setrow">${av(fr.userId)}<div class="lbl"><b style="font-weight:500">${esc(U(fr.userId).name)}</b></div>
+      <button class="cbtn" onclick="confirmRemove('${fr.fid}','${fr.userId}')">Entfernen</button></div>`).join('')}</div>`
+    : '<div class="card empty">Noch keine Freunde. Teile deinen Freundescode oder gib den Code eines Freundes ein.</div>'}
+  ${S.outgoing.length ? `<div class="sec"><h2>Gesendete Anfragen</h2></div><div class="setgroup">
+    ${S.outgoing.map(r => `<div class="setrow">${av(r.userId)}<div class="lbl">${esc(U(r.userId).name)}<small>wartet auf Bestätigung</small></div>
+      <button class="cbtn" onclick="removeFriendship('${r.fid}','Anfrage zurückgezogen')">Zurückziehen</button></div>`).join('')}</div>` : ''}`;
+}
+
 function viewBoard() {
   const items = [];
   S.bets.filter(b => b.type === 'challenge' && betPhase(b) === 'running').forEach(b => b.participants.forEach(p => {
-    if (p.userId === S.me || getSet(p.userId).public || isMine(b)) items.push({ b, p, st: pStatus(b, p) });
+    items.push({ b, p, st: pStatus(b, p) });
   }));
   items.sort((a, b) => a.st.out - b.st.out || b.st.streak - a.st.streak);
   return `<h1>Community</h1><div class="sub">Was deine Freunde gerade durchziehen</div>
+  <button class="card" style="display:flex;align-items:center;gap:12px;width:100%;text-align:left;cursor:pointer" onclick="go('friends')">
+    <div class="faces" style="margin-left:6px">${S.friends.slice(0, 5).map(f => av(f.userId, 'sm')).join('') || '<span class="av sm" style="background:var(--soft);color:var(--muted)">+</span>'}</div>
+    <div style="flex:1"><b style="font-weight:600">${S.friends.length ? `${S.friends.length} Freund${S.friends.length > 1 ? 'e' : ''}` : 'Freunde hinzufügen'}</b>
+      <div class="sub">${S.incoming.length ? `${S.incoming.length} neue Freundschaftsanfrage${S.incoming.length > 1 ? 'n' : ''}` : 'Freundesliste verwalten'}</div></div>
+    ${S.incoming.length ? `<span class="tag warn">${S.incoming.length}</span>` : ''}<span class="sub">›</span></button>
   <div class="sec"><h2>Challenges</h2><span class="sub">${items.length}</span></div>
   ${items.length ? `<div class="board">${items.map(({ b, p, st }) => `<div class="cb" onclick="go('bet',{id:'${b.id}'})">
       <div style="display:flex;align-items:center;gap:8px">${av(p.userId, 'sm')}<span style="font-weight:500;font-size:14px">${esc(U(p.userId).name)}</span>${p.checks[TODAY] ? '<span class="tag ok" style="margin-left:auto">✓ heute</span>' : ''}</div>
@@ -335,7 +461,7 @@ function viewBoard() {
 
 /* ---------- Neue Wette ---------- */
 let draft = null;
-function newDraft() { draft = { type: 'challenge', title: '', desc: '', emoji: '🔥', stake: getSet().defStake, len: 7, startMode: 'today', from: addDays(TODAY, -28), to: addDays(TODAY, 13), jokers: getSet().defJokers, goal: '', sameGoal: false, options: ['', ''] }; }
+function newDraft() { draft = { vis: getSet().defVis, viewers: [], type: 'challenge', title: '', desc: '', emoji: '🔥', stake: getSet().defStake, len: 7, startMode: 'today', from: addDays(TODAY, -28), to: addDays(TODAY, 13), jokers: getSet().defJokers, goal: '', sameGoal: false, options: ['', ''] }; }
 function viewCreate() {
   if (!draft) newDraft();
   const d = draft, emos = d.type === 'challenge' ? ['🔥', '👟', '🚭', '🍺', '💪', '🥗', '📵', '📚', '🧘', '💤'] : ['⚽', '🍕', '🎮', '🏀', '🎤', '🎲', '🍻', '💘', '🏎️', '🌧️'];
@@ -381,6 +507,8 @@ function viewCreate() {
     ${d.options.map((o, i) => `<input class="in" style="margin-top:6px" maxlength="40" placeholder="Option ${i + 1}" value="${esc(o)}" oninput="draft.options[${i}]=this.value">`).join('')}
     ${d.options.length < 6 ? `<button class="chip" style="margin-top:8px" onclick="draft.options.push('');render()">+ Option</button>` : ''}
   `}
+  <label class="f">Wer sieht die Wette in der Community?</label>
+  ${visPicker(d.vis, d.viewers, 'draft')}
   <div style="height:20px"></div>
   <button class="btn full" ${busy ? 'disabled' : ''} onclick="createBet()">Wette starten</button>`;
 }
@@ -412,7 +540,9 @@ async function createBet() {
   const bet = { type: d.type, emoji: d.emoji, title: d.title.trim(), descr: d.desc.trim(), stake: d.stake, start_date: start, end_date: end,
     jokers: d.type === 'challenge' ? d.jokers : 0, same_goal: d.type === 'challenge' && d.sameGoal, options: d.type === 'tipp' ? opts : [] };
   const mine = d.type === 'challenge' ? { goal: d.goal.trim(), since: start, credited_until: start < TODAY ? addDays(TODAY, -1) : null } : {};
-  const id = await run(() => api.createBet(bet, S.me, mine));
+  if (d.vis === 'selected' && !d.viewers.length) return toast('Wähl mindestens einen Freund aus');
+  bet.visibility = d.vis;
+  const id = await run(() => api.createBet(bet, S.me, mine, d.vis === 'selected' ? d.viewers : []));
   if (!id) return;
   draft = null;
   if (d.type === 'tipp') { go('bet', { id }); return openPick(id); }
@@ -527,8 +657,12 @@ function viewSettings() {
       <div class="chips">${[0, 1, 2, 3].map(v => `<button class="chip ${st.defJokers === v ? 'on' : ''}" onclick="setSet('defJokers',${v})">${v}</button>`).join('')}</div></div>
   </div>
 
-  <div class="sec"><h2>Privatsphäre</h2></div>
-  <div class="setgroup">${tog('public', 'Im Community Board zeigen', 'Wenn aus, sehen nur Mitspieler deiner Wetten deine Challenges')}</div>
+  <div class="sec"><h2>Freunde & Privatsphäre</h2></div>
+  <div class="setgroup">
+    <button class="setrow" onclick="go('friends')"><div class="lbl">Freunde<small>${S.friends.length} Freunde${S.incoming.length ? ` · ${S.incoming.length} neue Anfrage${S.incoming.length > 1 ? 'n' : ''}` : ''}</small></div><span class="sub">›</span></button>
+    <div class="setrow" style="display:block"><div class="lbl" style="margin-bottom:8px">Neue Wetten sichtbar für<small>Kannst du bei jeder Wette auch einzeln ändern</small></div>
+      <div class="segctl">${VIS.filter(([v]) => v !== 'selected').map(([v, l]) => `<button class="${st.defVis === v ? 'on' : ''}" onclick="setSet('defVis','${v}')">${l}</button>`).join('')}</div></div>
+  </div>
 
   <div class="sec"><h2>Hilfe</h2></div>
   <div class="setgroup">
@@ -631,22 +765,25 @@ function render() {
   if (!session) { $('#app').innerHTML = viewAuth(); navEl.style.display = 'none'; return; }
   if (!S) { $('#app').innerHTML = '<div class="spinner"></div>'; navEl.style.display = 'none'; return; }
   navEl.style.display = '';
-  const views = { home: viewHome, bet: viewBet, board: viewBoard, create: viewCreate, join: viewJoin, settings: viewSettings };
+  const views = { home: viewHome, bet: viewBet, board: viewBoard, create: viewCreate, join: viewJoin, settings: viewSettings, friends: viewFriends };
   $('#app').innerHTML = `<header><div class="logo"><img src="/icon.svg" alt="">BetFriends</div>
     <button class="me" onclick="go('settings')">${av(S.me, 'sm')} ${esc(U(S.me).name)}</button></header>` + (views[view.name] || viewHome)();
   const tabs = [['home', 'Wetten'], ['board', 'Community'], ['create', 'Neu'], ['join', 'Beitreten'], ['settings', 'Einstellungen']];
-  const cur = view.name === 'bet' ? 'home' : view.name;
+  const cur = view.name === 'bet' ? 'home' : view.name === 'friends' ? 'board' : view.name;
   $('#nav').innerHTML = tabs.map(([n, l]) => `<button class="${cur === n ? 'on' : ''}" onclick="go('${n}')">${ICONS[n]}${l}</button>`).join('');
 }
 
 // Inline-Handler brauchen globale Namen
 Object.assign(window, {
-  go, render, setStart, checkAll, toggleCheck, react, toggleThread, addComment, delComment, copyCode, setD, createBet, onCodeInput, joinBet,
+  go, render, setStart, checkAll, toggleCheck, refreshPicker, toggleViewer, openVisibility, saveVisibility, openInvite, sendInvites,
+  declineInvite, openInviteJoin, onFriendCode, addFriend, acceptFriend, removeFriendship, confirmRemove, shareFriendCode, react, toggleThread, addComment, delComment, copyCode, setD, createBet, onCodeInput, joinBet,
   modal, openPick, setPick, openResolve, resolveBet, setSet, setProfile, setTheme, openRules, openLogout, openPassword, savePassword,
   setAuth, submitAuth, doInstall, sb,
 });
 Object.defineProperty(window, 'draft', { get: () => draft });
 Object.defineProperty(window, 'joinState', { get: () => joinState });
+Object.defineProperty(window, 'visEdit', { get: () => visEdit, set: v => { visEdit = v; } });
+Object.defineProperty(window, 'inviteSel', { get: () => inviteSel, set: v => { inviteSel = v; } });
 
 /* ===================== Start ===================== */
 async function boot() {
@@ -654,6 +791,8 @@ async function boot() {
   if (!configured) return;
   // Einladungslink: /?code=ABC123 öffnet direkt "Beitreten"
   const code = new URLSearchParams(location.search).get('code');
+  const fcode = new URLSearchParams(location.search).get('friend');
+  if (fcode) { view = { name: 'friends' }; friendState.code = fcode.toUpperCase().slice(0, 6); history.replaceState(null, '', '/'); }
   if (code) { view = { name: 'join' }; joinState.code = code.toUpperCase().slice(0, 6); history.replaceState(null, '', '/'); }
 
   const { data } = await sb.auth.getSession();
@@ -663,10 +802,11 @@ async function boot() {
     const was = session?.user.id; session = s;
     if (event === 'PASSWORD_RECOVERY') setTimeout(() => openPassword(true), 50);
     if (!s) { S = null; unsub?.(); unsub = null; auth = { mode: 'login', msg: '', err: '' }; render(); return; }
-    if (s.user.id !== was) { S = null; if (was === undefined && view.name !== 'join') view = { name: 'home' }; render(); refresh(); unsub?.(); unsub = subscribe(refresh); }
+    if (s.user.id !== was) { S = null; if (was === undefined && !['join', 'friends'].includes(view.name)) view = { name: 'home' }; render(); refresh(); unsub?.(); unsub = subscribe(refresh); }
   });
   if (session) { await refresh(); unsub = subscribe(refresh); }
   if (joinState.code.length === 6 && session) lookup(joinState.code);
+  if (friendState.code.length === 6 && session) lookupFriend(friendState.code);
   render();
   // Beim Zurückkehren in die App frisch laden (z. B. neuer Tag)
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
