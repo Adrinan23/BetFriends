@@ -798,7 +798,6 @@ function viewSettings() {
   <div class="setgroup">
     <a class="setrow" href="/nutzungsregeln.html"><div class="lbl">Nutzungsregeln</div><span class="sub">›</span></a>
     <a class="setrow" href="/datenschutz.html"><div class="lbl">Datenschutz</div><span class="sub">›</span></a>
-    <a class="setrow" href="/impressum.html"><div class="lbl">Impressum</div><span class="sub">›</span></a>
   </div>`;
 }
 function openRules() {
@@ -929,7 +928,7 @@ function viewAuth() {
       ${m === 'login' ? `<button class="linkbtn" onclick="setAuth('register')">Neu hier? Konto erstellen</button><button class="linkbtn" onclick="setAuth('reset')">Passwort vergessen?</button>`
         : `<button class="linkbtn" onclick="setAuth('login')">← Zur Anmeldung</button>`}
     </div>
-    <div class="legalfoot"><a href="/impressum.html">Impressum</a><a href="/datenschutz.html">Datenschutz</a><a href="/nutzungsregeln.html">Nutzungsregeln</a></div>
+    <div class="legalfoot"><a href="/datenschutz.html">Datenschutz</a><a href="/nutzungsregeln.html">Nutzungsregeln</a></div>
   </div>`;
 }
 function setAuth(mode) { auth = { mode, msg: '', err: '', email: auth.email }; render(); }

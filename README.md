@@ -59,9 +59,9 @@ Die Schlüssel für Web Push (VAPID) erzeugt die Funktion beim ersten Aufruf sel
 
 In der App: **Einstellungen → Benachrichtigungen → Erlauben**, Uhrzeit wählen, mit „Test“ prüfen. Erinnert wird nur, wenn an dem Tag noch eine laufende Challenge offen ist. Auf dem iPhone geht das nur in der installierten App (Home-Bildschirm, iOS 16.4+).
 
-## Impressum, Datenschutz, Nutzungsregeln
+## Datenschutz, Nutzungsregeln
 
-Die Seiten liegen als einfache HTML-Dateien in `public/` (`impressum.html`, `datenschutz.html`, `nutzungsregeln.html`) und sind auch ohne Anmeldung erreichbar. Verlinkt sind sie auf dem Anmeldebildschirm, bei der Registrierung (Pflicht-Häkchen für Mindestalter und Regeln) und in den Einstellungen unter „Rechtliches“. Das Mindestalter steht in `src/main.js` (`MIN_AGE`) und in `nutzungsregeln.html`.
+Die Seiten liegen als einfache HTML-Dateien in `public/` (`datenschutz.html`, `nutzungsregeln.html`) und sind auch ohne Anmeldung erreichbar. Verlinkt sind sie auf dem Anmeldebildschirm, bei der Registrierung (Pflicht-Häkchen für Mindestalter und Regeln) und in den Einstellungen unter „Rechtliches“. Das Mindestalter steht in `src/main.js` (`MIN_AGE`) und in `nutzungsregeln.html`.
 
 „Konto löschen“ in den Einstellungen braucht `supabase/migrations/0006_konto_loeschen.sql` (einmal im SQL Editor ausführen).
 
