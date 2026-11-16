@@ -32,7 +32,7 @@ export async function loadState(meId) {
   const partIdx = {};
   for (const p of parts) {
     const b = byBet[p.bet_id]; if (!b) continue;
-    const o = { userId: p.user_id, goal: p.goal, pick: p.pick, checks: {} };
+    const o = { userId: p.user_id, goal: p.goal, pick: p.pick, since: p.since, credit: p.credited_until, checks: {} };
     b.participants.push(o); partIdx[p.bet_id + '|' + p.user_id] = o;
   }
   for (const c of checks) { const p = partIdx[c.bet_id + '|' + c.user_id]; if (p) p.checks[c.day] = true; }
@@ -87,7 +87,7 @@ export const api = {
     must(await sb.from('feed').insert({ bet_id: betId, user_id: userId, kind: 'result' }));
   },
   async findBet(code) { return must(await sb.rpc('find_bet', { p_code: code }))[0] || null; },
-  async joinBet(code, goal, pick) { return must(await sb.rpc('join_bet', { p_code: code, p_goal: goal || '', p_pick: pick ?? null })); },
+  async joinBet(code, goal, pick, since) { return must(await sb.rpc('join_bet', { p_code: code, p_goal: goal || '', p_pick: pick ?? null, p_since: since || null })); },
   async updateProfile(id, fields) { must(await sb.from('profiles').update(fields).eq('id', id)); },
 };
 
