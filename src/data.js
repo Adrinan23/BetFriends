@@ -64,7 +64,7 @@ export async function loadState(meId) {
 export const api = {
   // ---- Push-Benachrichtigungen ----
   async pushKey() {
-    const { data, error } = await sb.functions.invoke('push', { body: { action: 'key' } });
+    const { data, error } = await sb.functions.invoke('Push', { body: { action: 'key' } });
     if (error || !data?.publicKey) throw error || new Error('Push-Server nicht erreichbar');
     return data.publicKey;
   },
@@ -74,7 +74,7 @@ export const api = {
   },
   async deletePushSub(endpoint) { must(await sb.from('push_subscriptions').delete().eq('endpoint', endpoint)); },
   async testPush() {
-    const { data, error } = await sb.functions.invoke('push', { body: { action: 'test' } });
+    const { data, error } = await sb.functions.invoke('Push', { body: { action: 'test' } });
     if (error) throw error;
     return data?.sent || 0;
   },

@@ -1,6 +1,6 @@
 -- BetFriends: Push-Benachrichtigungen (tägliche Erinnerung)
 -- Im Supabase SQL Editor einmal ausführen (nach 0001–0004).
--- Danach die Edge Function "push" anlegen (siehe README, Abschnitt Push).
+-- Danach die Edge Function "Push" anlegen (siehe README, Abschnitt Push).
 
 -- ---------------------------------------------------------------------------
 -- Push-Abos: ein Eintrag pro Gerät/Browser
@@ -103,7 +103,7 @@ select cron.schedule(
   '*/15 * * * *',
   $cron$
     select net.http_post(
-      url := 'https://ufkmwqwxryerbifflfmj.supabase.co/functions/v1/push',
+      url := 'https://ufkmwqwxryerbifflfmj.supabase.co/functions/v1/Push',
       headers := '{"Content-Type": "application/json"}'::jsonb,
       body := '{"action": "daily"}'::jsonb
     );

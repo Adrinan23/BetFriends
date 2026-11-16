@@ -51,8 +51,8 @@ npm run dev
 
 Einmalig einrichten:
 
-1. `supabase/migrations/0005_push.sql` im SQL Editor ausführen. Das legt die Tabelle für Push-Abos an und einen Zeitplan (pg_cron), der alle 15 Minuten die Funktion `push` aufruft.
-2. **Edge Functions → Deploy a new function → Via Editor**, Name **`push`**, den Inhalt von [`supabase/functions/push/index.ts`](supabase/functions/push/index.ts) einfügen und **Deploy**.
+1. `supabase/migrations/0005_push.sql` im SQL Editor ausführen. Das legt die Tabelle für Push-Abos an und einen Zeitplan (pg_cron), der alle 15 Minuten die Funktion `Push` aufruft.
+2. **Edge Functions → Deploy a new function → Via Editor**, Name **`Push`** (Adresse endet auf `/functions/v1/Push`), den Inhalt von [`supabase/functions/push/index.ts`](supabase/functions/push/index.ts) einfügen und **Deploy**.
 3. In der Funktion unter **Details** „Verify JWT“ / „Enforce JWT Verification“ **ausschalten** (der Zeitplan ruft ohne Login auf; die Funktion prüft selbst, wer was darf).
 
 Die Schlüssel für Web Push (VAPID) erzeugt die Funktion beim ersten Aufruf selbst und speichert sie in `app_secrets`; dort kann kein App-Nutzer lesen.
