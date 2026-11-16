@@ -642,7 +642,7 @@ function viewSettings() {
   <div class="sec"><h2>Benachrichtigungen</h2><span class="sub">bald verfügbar</span></div>
   <div class="setgroup">
     ${tog('notifDaily', 'Tägliche Erinnerung', 'Erinnert dich, wenn du heute noch nicht abgehakt hast')}
-    ${st.notifDaily ? `<div class="setrow"><div class="lbl">Uhrzeit</div><input class="in" type="time" style="width:120px;padding:6px 10px" value="${st.reminder}" onchange="setSet('reminder',this.value)"></div>` : ''}
+    ${st.notifDaily ? `<div class="setrow"><div class="lbl">Uhrzeit</div><input class="in" type="time" style="width:auto;flex:none;padding:6px 10px" value="${st.reminder}" onchange="setSet('reminder',this.value)"></div>` : ''}
     ${tog('notifComments', 'Kommentare', 'Wenn jemand deine Wetten oder Fortschritte kommentiert')}
     ${tog('notifReacts', 'Reaktionen', 'Emojis auf deine Fortschritte')}
     ${tog('notifNewBets', 'Neue Wetten von Freunden')}
