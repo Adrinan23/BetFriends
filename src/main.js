@@ -39,13 +39,18 @@ const names = ids => ids.map(id => esc(U(id).name)).join(', ');
 /* ===================== Spielregeln ===================== */
 // Challenge: jeder Tag von Start bis gestern (bzw. Ende) muss abgehakt sein.
 // Verpasste Tage werden erst mit Jokern ausgeglichen, danach ist man raus.
+// "dabei seit": ab wann die Challenge für diese Person zählt (Standard: Start der Wette).
+// Tage bis "credit" stammen aus der Zeit vor der App und gelten als geschafft.
+const pStart = (b, p) => p.since || b.start;
+const done = (p, d) => !!p.checks[d] || (!!p.credit && d <= p.credit);
 function pStatus(b, p) {
   const last = b.end && TODAY > b.end ? b.end : addDays(TODAY, -1);
+  const start = pStart(b, p);
   let missed = 0;
-  for (let d = b.start; d <= last; d = addDays(d, 1)) if (!p.checks[d]) missed++;
+  for (let d = start; d <= last; d = addDays(d, 1)) if (!done(p, d)) missed++;
   const out = missed > (b.jokers || 0);
   let streak = 0;
-  for (let d = (p.checks[TODAY] ? TODAY : addDays(TODAY, -1)); d >= b.start && p.checks[d]; d = addDays(d, -1)) streak++;
+  for (let d = (done(p, TODAY) ? TODAY : addDays(TODAY, -1)); d >= start && done(p, d); d = addDays(d, -1)) streak++;
   return { missed, out, streak };
 }
 function betPhase(b) {
@@ -120,6 +125,14 @@ function toggleCheck(betId) {
     run(() => api.check(betId, S.me, TODAY), `Erledigt. ${pStatus(b, p).streak} Tage am Stück`);
   }
 }
+function checkAll() {
+  const open = S.bets.filter(b => b.type === 'challenge' && betPhase(b) === 'running')
+    .map(b => ({ b, p: b.participants.find(p => p.userId === S.me) }))
+    .filter(x => x.p && !pStatus(x.b, x.p).out && !x.p.checks[TODAY]);
+  if (!open.length) return;
+  open.forEach(x => { x.p.checks[TODAY] = true; }); render();
+  run(async () => { for (const x of open) await api.check(x.b.id, S.me, TODAY); }, `${open.length} Challenges abgehakt`);
+}
 function react(fid, emo) {
   const f = S.feed.find(x => x.id === fid); const on = !(f.reacts[emo] || []).includes(S.me);
   run(() => api.react(fid, S.me, emo, on));
@@ -185,7 +198,7 @@ function feedText(f) {
   const p = b?.participants.find(p => p.userId === f.userId);
   switch (f.kind) {
     case 'new': return `${n} hat eine neue Wette gestartet: ${t}`;
-    case 'join': return `${n} ist bei ${t} eingestiegen${p?.goal && !b.sameGoal ? ` mit dem Ziel „${esc(p.goal)}“` : ''}`;
+    case 'join': return `${n} ist bei ${t} eingestiegen${p?.goal && !b.sameGoal ? ` mit dem Ziel „${esc(p.goal)}“` : ''}${p?.credit ? ` (schon seit ${fmtDate(p.since)} dabei)` : ''}`;
     case 'check': return `${n} hat heute abgehakt: ${esc(p?.goal || b?.title)} <span class="sub">· ${esc(b?.title)}</span>`;
     case 'joker': return `${n} hat einen Joker bei ${t} eingesetzt`;
     case 'result': return `Ergebnis bei ${t}: <b>${esc(b?.options?.[b.result])}</b>`;
@@ -229,7 +242,7 @@ function viewHome() {
   ${installHint()}
   ${todos.length ? `<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-      <h2>Heute</h2><span class="tag ${left ? 'warn' : 'ok'}">${left ? left + ' offen' : 'Alles erledigt'}</span></div>
+      <h2>Heute</h2><div style="display:flex;gap:6px;align-items:center">${left > 1 ? `<button class="btn sec2 sm" onclick="checkAll()">Alle abhaken</button>` : ''}<span class="tag ${left ? 'warn' : 'ok'}">${left ? left + ' offen' : 'Alles erledigt'}</span></div></div>
     ${todos.map(({ b, p }) => `<div class="todo">
       <button class="check ${p.checks[TODAY] ? 'on' : ''} ${view.pop === b.id ? 'pop' : ''}" onclick="toggleCheck('${b.id}')" aria-label="Abhaken">${p.checks[TODAY] ? '✓' : ''}</button>
       <div style="flex:1;cursor:pointer" onclick="go('bet',{id:'${b.id}'})"><div style="font-weight:500">${esc(p.goal)}</div><div class="sub">${esc(b.title)} · ${pStatus(b, p).streak} Tage Serie</div></div>
@@ -246,21 +259,25 @@ function viewBet() {
   const ph = betPhase(b), me = b.participants.find(p => p.userId === S.me), w = winners(b);
   let body = '';
   if (b.type === 'challenge') {
+    const first = b.participants.reduce((m, p) => pStart(b, p) < m ? pStart(b, p) : m, b.start);
     const days = [], until = b.end || (TODAY < b.start ? b.start : TODAY);
-    for (let d = b.start; d <= until; d = addDays(d, 1)) days.push(d);
+    for (let d = first; d <= until; d = addDays(d, 1)) days.push(d);
+    const anyCredit = b.participants.some(p => p.credit);
     const shown = days.length > 60 ? days.slice(-60) : days;
     body = `<div class="sec"><h2>Teilnehmer</h2><span class="sub">${b.jokers ? b.jokers + ' Joker pro Person' : 'Keine Joker'}</span></div>
     <div class="card">${b.participants.map(p => { const st = pStatus(b, p); let used = 0;
       return `<div class="prow">${av(p.userId)}<div style="flex:1;min-width:0">
         <div style="display:flex;justify-content:space-between;gap:8px"><b style="font-weight:600">${esc(U(p.userId).name)}</b>
           ${ph === 'soon' ? '' : st.out ? `<span class="tag bad">Ausgeschieden</span>` : `<span class="tag ok">${st.streak} Tage</span>`}</div>
-        <div class="sub">${esc(p.goal)}</div>
+        <div class="sub">${esc(p.goal)}${p.credit ? ` · dabei seit ${fmtDate(pStart(b, p))}` : ''}</div>
         <div class="grid">${shown.map(d => { let c = '';
-          if (d < TODAY) c = p.checks[d] ? 'ok' : (used++ < (b.jokers || 0) ? 'joker' : 'miss');
+          if (d < pStart(b, p)) c = 'na';
+          else if (!p.checks[d] && p.credit && d <= p.credit) c = 'ok pre';
+          else if (d < TODAY) c = p.checks[d] ? 'ok' : (used++ < (b.jokers || 0) ? 'joker' : 'miss');
           else if (d === TODAY && p.checks[d]) c = 'ok';
           return `<span class="day ${c} ${d === TODAY ? 'today' : ''}" title="${fmtDate(d)}"></span>`; }).join('')}</div>
       </div></div>`; }).join('')}
-      <div class="legend"><span style="--c:var(--ok)">geschafft</span><span style="--c:#F5B53F">Joker</span><span style="--c:var(--bad)">verpasst</span></div>
+      <div class="legend"><span style="--c:var(--ok)">geschafft</span><span style="--c:#F5B53F">Joker</span><span style="--c:var(--bad)">verpasst</span>${anyCredit ? '<span style="--c:var(--ok);opacity:.5">vor der App</span>' : ''}</div>
     </div>
     ${me && ph === 'running' && !pStatus(b, me).out ? `<button class="btn ${me.checks[TODAY] ? 'sec2' : ''} full" onclick="toggleCheck('${b.id}')">${me.checks[TODAY] ? '✓ Heute erledigt · rückgängig' : 'Heute geschafft'}</button>` : ''}
     ${!b.end && ph !== 'done' ? `<div class="note">Keine feste Dauer: Die Challenge läuft, bis nur noch einer übrig ist. Noch dabei: <b>${names(w)}</b>.</div>` : ''}
@@ -318,11 +335,12 @@ function viewBoard() {
 
 /* ---------- Neue Wette ---------- */
 let draft = null;
-function newDraft() { draft = { type: 'challenge', title: '', desc: '', emoji: '🔥', stake: getSet().defStake, len: 7, from: TODAY, to: addDays(TODAY, 13), jokers: getSet().defJokers, goal: '', sameGoal: false, options: ['', ''] }; }
+function newDraft() { draft = { type: 'challenge', title: '', desc: '', emoji: '🔥', stake: getSet().defStake, len: 7, startMode: 'today', from: addDays(TODAY, -28), to: addDays(TODAY, 13), jokers: getSet().defJokers, goal: '', sameGoal: false, options: ['', ''] }; }
 function viewCreate() {
   if (!draft) newDraft();
   const d = draft, emos = d.type === 'challenge' ? ['🔥', '👟', '🚭', '🍺', '💪', '🥗', '📵', '📚', '🧘', '💤'] : ['⚽', '🍕', '🎮', '🏀', '🎤', '🎲', '🍻', '💘', '🏎️', '🌧️'];
-  const lens = d.type === 'challenge' ? [[1, 'Nur heute'], [7, '1 Woche'], [30, '30 Tage'], ['custom', 'Eigener Zeitraum'], ['open', 'Ohne Ende']] : [[1, 'Heute'], [2, 'Morgen'], ['custom', 'Eigenes Datum'], ['open', 'Ohne Datum']];
+  const lens = d.type === 'challenge' ? [[1, '1 Tag'], [7, '1 Woche'], [30, '30 Tage'], ['custom', 'Bis Datum'], ['open', 'Ohne Ende']] : [[1, 'Heute'], [2, 'Morgen'], ['custom', 'Eigenes Datum'], ['open', 'Ohne Datum']];
+  const pl = planDates(d);
   const q = v => typeof v === 'string' ? `'${v}'` : v;
   const stakes = [2, 5, 10, 20, 50];
   return `<h1>Neue Wette</h1><div class="sub">Danach bekommst du einen Code für deine Freunde.</div>
@@ -340,13 +358,17 @@ function viewCreate() {
   <label class="f">Einsatz pro Person</label>
   <div class="chips">${stakes.map(v => `<button class="chip ${d.stake === v ? 'on' : ''}" onclick="setD('stake',${v})">${v} €</button>`).join('')}
     <input class="in" style="width:100px;padding:6px 10px" type="number" inputmode="decimal" min="0" step="0.5" value="${stakes.includes(d.stake) ? '' : d.stake}" placeholder="Betrag" oninput="draft.stake=Math.max(0,+this.value||0)"></div>
+  ${d.type === 'challenge' ? `
+    <label class="f">Start</label>
+    <div class="chips">${[['today', 'Heute'], ['past', 'Schon früher begonnen'], ['future', 'Später']].map(([v, l]) => `<button class="chip ${d.startMode === v ? 'on' : ''}" onclick="setStart('${v}')">${l}</button>`).join('')}</div>
+    ${d.startMode === 'past' ? `<input class="in" style="margin-top:8px" type="date" max="${addDays(TODAY, -1)}" min="${addDays(TODAY, -1095)}" value="${d.from}" onchange="draft.from=this.value;render()">
+      <div class="note" style="margin-top:6px">Die ${diffDays(d.from, TODAY)} Tage seit dem ${fmtDate(d.from)} werden dir als geschafft angerechnet. Ab heute hakst du in der App ab.</div>` : ''}
+    ${d.startMode === 'future' ? `<input class="in" style="margin-top:8px" type="date" min="${addDays(TODAY, 1)}" value="${d.from}" onchange="draft.from=this.value;render()">` : ''}
+  ` : ''}
   <label class="f">${d.type === 'challenge' ? 'Dauer' : 'Auflösung'}</label>
   <div class="chips">${lens.map(([v, l]) => `<button class="chip ${d.len === v ? 'on' : ''}" onclick="setD('len',${q(v)})">${l}</button>`).join('')}</div>
-  ${d.len === 'custom' ? (d.type === 'challenge' ? `<div class="row" style="margin-top:8px">
-      <div><div class="sub" style="margin-bottom:4px">Start</div><input class="in" type="date" min="${TODAY}" value="${d.from}" onchange="draft.from=this.value;if(draft.to<draft.from)draft.to=draft.from;render()"></div>
-      <div><div class="sub" style="margin-bottom:4px">Ende</div><input class="in" type="date" min="${d.from}" value="${d.to}" onchange="draft.to=this.value;render()"></div></div>
-      <div class="note" style="margin-top:6px">${diffDays(d.from, d.to) + 1} Tage${d.from > TODAY ? ', startet am ' + fmtDate(d.from) : ''}</div>`
-    : `<div style="margin-top:8px"><input class="in" type="date" min="${TODAY}" value="${d.to}" onchange="draft.to=this.value"></div>`) : ''}
+  ${d.len === 'custom' ? `<div style="margin-top:8px"><input class="in" type="date" min="${pl.start > TODAY ? pl.start : TODAY}" value="${d.to}" onchange="draft.to=this.value;render()"></div>` : ''}
+  ${d.type === 'challenge' && d.len !== 'open' ? `<div class="note" style="margin-top:6px">${pl.end < TODAY ? '<span style="color:var(--bad)">Das Ende liegt schon in der Vergangenheit. Wähl eine längere Dauer oder „Ohne Ende“.</span>' : `${fmtDate(pl.start)} bis ${fmtDate(pl.end)} · ${diffDays(pl.start, pl.end) + 1} Tage`}</div>` : ''}
   ${d.len === 'open' ? `<div class="note" style="margin-top:8px">${d.type === 'challenge' ? 'Kein Enddatum: Jeder hakt täglich ab, und wer als Letzter übrig bleibt, gewinnt den Pott.' : 'Das Ergebnis wird eingetragen, wann immer es feststeht.'}</div>` : ''}
   ${d.type === 'challenge' ? `
     <label class="f">Joker (Tage, die man verpassen darf)</label>
@@ -362,6 +384,22 @@ function viewCreate() {
   <div style="height:20px"></div>
   <button class="btn full" ${busy ? 'disabled' : ''} onclick="createBet()">Wette starten</button>`;
 }
+// Start und Ende aus dem Formular berechnen
+function planDates(d) {
+  const start = d.type === 'challenge' && d.startMode !== 'today' ? d.from : TODAY;
+  let end;
+  if (d.len === 'open') end = null;
+  else if (d.len === 'custom') end = d.to < start ? start : d.to;
+  else end = addDays(start, d.len - 1);
+  return { start, end };
+}
+function setStart(m) {
+  draft.startMode = m;
+  if (m === 'past' && draft.from >= TODAY) draft.from = addDays(TODAY, -28);
+  if (m === 'future' && draft.from <= TODAY) draft.from = addDays(TODAY, 1);
+  if (m === 'past' && draft.len !== 'custom') draft.len = 'open';
+  render();
+}
 function setD(k, v) { draft[k] = v; if (k === 'type') { draft.emoji = v === 'challenge' ? '🔥' : '⚽'; draft.len = v === 'challenge' ? 7 : 1; } render(); }
 async function createBet() {
   const d = draft;
@@ -369,13 +407,11 @@ async function createBet() {
   if (d.type === 'challenge' && !d.goal.trim()) return toast('Trag noch ein Ziel ein');
   const opts = d.options.map(o => o.trim()).filter(Boolean);
   if (d.type === 'tipp' && opts.length < 2) return toast('Mindestens zwei Optionen');
-  let start = TODAY, end;
-  if (d.len === 'open') end = null;
-  else if (d.len === 'custom') { start = d.type === 'challenge' ? d.from : TODAY; end = d.to < start ? start : d.to; }
-  else end = addDays(TODAY, d.len - 1);
+  const { start, end } = planDates(d);
+  if (end && end < TODAY) return toast('Das Ende liegt in der Vergangenheit');
   const bet = { type: d.type, emoji: d.emoji, title: d.title.trim(), descr: d.desc.trim(), stake: d.stake, start_date: start, end_date: end,
     jokers: d.type === 'challenge' ? d.jokers : 0, same_goal: d.type === 'challenge' && d.sameGoal, options: d.type === 'tipp' ? opts : [] };
-  const mine = d.type === 'challenge' ? { goal: d.goal.trim() } : {};
+  const mine = d.type === 'challenge' ? { goal: d.goal.trim(), since: start, credited_until: start < TODAY ? addDays(TODAY, -1) : null } : {};
   const id = await run(() => api.createBet(bet, S.me, mine));
   if (!id) return;
   draft = null;
@@ -384,7 +420,7 @@ async function createBet() {
 }
 
 /* ---------- Beitreten ---------- */
-let joinState = { code: '', goal: '', pick: null, found: null, looking: false, notFound: false };
+let joinState = { code: '', goal: '', pick: null, since: null, found: null, looking: false, notFound: false };
 function onCodeInput(v) {
   joinState.code = v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
   joinState.found = null; joinState.notFound = false;
@@ -416,6 +452,10 @@ function viewJoin() {
     </div>
     ${f.already_joined ? `<button class="btn full" onclick="go('bet',{id:'${f.id}'})">Du bist schon dabei · ansehen</button>` : done ? `<div class="note">Diese Wette ist schon vorbei.</div>` : `
       ${f.type === 'challenge' ? (f.same_goal ? `<div class="note">Ziel für alle: <b>${esc(f.shared_goal)}</b></div>` : `<label class="f">Dein persönliches Ziel</label><input class="in" maxlength="60" placeholder="z. B. Kein Alkohol" value="${esc(joinState.goal)}" oninput="joinState.goal=this.value">`)
+        + (!f.end_date ? `<label class="f">Seit wann machst du das schon?</label>
+          <div class="chips"><button class="chip ${!joinState.since ? 'on' : ''}" onclick="joinState.since=null;render()">Ab heute</button><button class="chip ${joinState.since ? 'on' : ''}" onclick="joinState.since=joinState.since||'${addDays(TODAY, -28)}';render()">Schon früher begonnen</button></div>
+          ${joinState.since ? `<input class="in" style="margin-top:8px" type="date" max="${addDays(TODAY, -1)}" min="${addDays(TODAY, -1095)}" value="${joinState.since}" onchange="joinState.since=this.value;render()">
+            <div class="note" style="margin-top:6px">Die ${diffDays(joinState.since, TODAY)} Tage seit dem ${fmtDate(joinState.since)} werden dir angerechnet.</div>` : ''}` : '')
         : `<label class="f">Dein Tipp</label>${f.options.map((o, i) => `<button class="opt ${joinState.pick === i ? 'on' : ''}" onclick="joinState.pick=${i};render()">${esc(o)}</button>`).join('')}`}
       <div style="height:16px"></div>
       <button class="btn full" ${busy ? 'disabled' : ''} onclick="joinBet()">Beitreten · ${euro(Number(f.stake))}</button>`}` : ''}`;
@@ -424,9 +464,9 @@ async function joinBet() {
   const f = joinState.found;
   if (f.type === 'challenge' && !f.same_goal && !joinState.goal.trim()) return toast('Trag dein Ziel ein');
   if (f.type === 'tipp' && joinState.pick == null) return toast('Wähl deinen Tipp');
-  const id = await run(() => api.joinBet(joinState.code, joinState.goal.trim(), joinState.pick), 'Du bist dabei');
+  const id = await run(() => api.joinBet(joinState.code, joinState.goal.trim(), joinState.pick, joinState.found.type === 'challenge' && !joinState.found.end_date ? joinState.since : null), 'Du bist dabei');
   if (!id) return;
-  joinState = { code: '', goal: '', pick: null, found: null, looking: false, notFound: false };
+  joinState = { code: '', goal: '', pick: null, since: null, found: null, looking: false, notFound: false };
   go('bet', { id });
 }
 
@@ -601,7 +641,7 @@ function render() {
 
 // Inline-Handler brauchen globale Namen
 Object.assign(window, {
-  go, render, toggleCheck, react, toggleThread, addComment, delComment, copyCode, setD, createBet, onCodeInput, joinBet,
+  go, render, setStart, checkAll, toggleCheck, react, toggleThread, addComment, delComment, copyCode, setD, createBet, onCodeInput, joinBet,
   modal, openPick, setPick, openResolve, resolveBet, setSet, setProfile, setTheme, openRules, openLogout, openPassword, savePassword,
   setAuth, submitAuth, doInstall, sb,
 });

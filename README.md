@@ -21,7 +21,7 @@ Die App bewegt kein Geld. Sie zeigt nur an, wer wie viel setzt; bezahlt wird unt
 ### 1. Supabase
 
 1. Auf supabase.com ein neues Projekt anlegen.
-2. **SQL Editor** öffnen, den Inhalt von [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql) einfügen und ausführen.
+2. **SQL Editor** öffnen und die Dateien aus [`supabase/migrations/`](supabase/migrations/) **der Reihe nach** (0001, 0002, …) einfügen und ausführen. Bei späteren Updates nur die neuen Dateien ausführen.
 3. **Authentication → URL Configuration:** „Site URL“ auf die spätere Adresse der App setzen (z. B. `https://betfriends.vercel.app`) und dieselbe Adresse unter „Redirect URLs“ eintragen. Sonst führen die Bestätigungs-Mails ins Leere.
 4. **Project Settings → API:** „Project URL“ und „anon public key“ kopieren.
 
