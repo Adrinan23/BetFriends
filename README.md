@@ -67,6 +67,10 @@ Die Seiten liegen als einfache HTML-Dateien in `public/` (`impressum.html`, `dat
 
 Die Schrift Inter wird über `@fontsource/inter` selbst ausgeliefert, nicht von Google Fonts.
 
+## Punkte
+
+Gesetzt wird mit Spielpunkten (`supabase/migrations/0007_punkte.sql`, einmal im SQL Editor ausführen). Jeder startet mit 1.000 Punkten; Einsatz wird beim Beitreten abgezogen; Abrechnung läuft auf dem Server (`settle_bet`), beim Laden der App für die eigenen Wetten und stündlich per pg_cron für alle. Solo-Challenges: bis zu 10 Punkte pro Tag, aufgeteilt auf alle laufenden Solo-Challenges. Überweisen nur an Freunde. Montags werden Konten unter 100 auf 100 aufgefüllt. Punkte kann man nicht kaufen oder auszahlen.
+
 ## Als App installieren
 
 - **Android/Chrome:** In der App erscheint ein „Installieren“-Hinweis.

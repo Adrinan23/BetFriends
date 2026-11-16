@@ -9,7 +9,11 @@ export const sb = configured ? createClient(url, key, { auth: { persistSession: 
 const must = ({ data, error }) => { if (error) throw error; return data; };
 
 export async function loadState(meId) {
-  const [profiles, bets, parts, checks, feed, reactions, comments, friendships, viewers, invites] = await Promise.all([
+  // Fällige Wetten abrechnen, bevor geladen wird (Fehler hier sollen das Laden nicht blockieren)
+  await sb.rpc('settle_my_due').then(() => {}, () => {});
+  const [wallet, txs, profiles, bets, parts, checks, feed, reactions, comments, friendships, viewers, invites] = await Promise.all([
+    sb.from('wallets').select('points').eq('user_id', meId).maybeSingle(),
+    sb.from('point_tx').select('*').eq('user_id', meId).order('id', { ascending: false }).limit(100),
     sb.from('profiles').select('*'),
     sb.from('bets').select('*').order('created_at', { ascending: false }),
     sb.from('participants').select('*').order('joined_at'),
@@ -29,6 +33,7 @@ export async function loadState(meId) {
       id: b.id, code: b.code, type: b.type, emoji: b.emoji, title: b.title, desc: b.descr, creator: b.creator,
       stake: Number(b.stake), start: b.start_date, end: b.end_date, visibility: b.visibility || 'friends', viewers: [], jokers: b.jokers, sameGoal: b.same_goal,
       options: b.options || [], result: b.result, created: Date.parse(b.created_at), participants: [], comments: [],
+      settled: !!b.settled_at, winners: b.winners || null,
     };
     byBet[b.id] = o; return o;
   });
@@ -57,7 +62,9 @@ export async function loadState(meId) {
   const outgoing = friendships.filter(f => f.status === 'pending' && f.requester === meId).map(f => ({ fid: f.id, userId: f.addressee }));
   const myCode = profiles.find(p => p.id === meId)?.friend_code || '';
   const outInvites = invites.filter(i => byBet[i.bet_id]).map(i => ({ betId: i.bet_id, userId: i.user_id, by: i.invited_by }));
-  return { me: meId, users, bets: outBets, feed: outFeed, friends, incoming, outgoing, myCode, invites: outInvites };
+  const points = wallet?.points ?? 0;
+  const tx = txs.map(t => ({ id: t.id, amount: t.amount, kind: t.kind, betId: t.bet_id, betTitle: t.bet_title, other: t.other_user, otherName: t.other_name, note: t.note, day: t.day, ts: Date.parse(t.created_at) }));
+  return { me: meId, points, tx, users, bets: outBets, feed: outFeed, friends, incoming, outgoing, myCode, invites: outInvites };
 }
 
 // ---------- Aktionen ----------
@@ -131,6 +138,7 @@ export const api = {
   async acceptFriend(fid) { must(await sb.rpc('accept_friend', { p_id: fid })); },
   async removeFriendship(fid) { must(await sb.from('friendships').delete().eq('id', fid)); },
   async updateProfile(id, fields) { must(await sb.from('profiles').update(fields).eq('id', id)); },
+  async transfer(to, amount, note) { must(await sb.rpc('transfer_points', { p_to: to, p_amount: amount, p_note: note || '' })); },
   async deleteAccount() { must(await sb.rpc('delete_my_account')); },
 };
 
