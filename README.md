@@ -47,6 +47,18 @@ npm run dev
 - Beitreten geht nur über den Code (`join_bet`), abhaken nur für sich selbst und nur für gestern bis morgen.
 - Tipps lassen sich nach dem Ergebnis nicht mehr ändern; das Ergebnis trägt nur der Ersteller ein.
 
+## Push-Benachrichtigungen (tägliche Erinnerung)
+
+Einmalig einrichten:
+
+1. `supabase/migrations/0005_push.sql` im SQL Editor ausführen. Das legt die Tabelle für Push-Abos an und einen Zeitplan (pg_cron), der alle 15 Minuten die Funktion `Push` aufruft.
+2. **Edge Functions → Deploy a new function → Via Editor**, Name **`Push`** (Adresse endet auf `/functions/v1/Push`), den Inhalt von [`supabase/functions/push/index.ts`](supabase/functions/push/index.ts) einfügen und **Deploy**.
+3. In der Funktion unter **Details** „Verify JWT“ / „Enforce JWT Verification“ **ausschalten** (der Zeitplan ruft ohne Login auf; die Funktion prüft selbst, wer was darf).
+
+Die Schlüssel für Web Push (VAPID) erzeugt die Funktion beim ersten Aufruf selbst und speichert sie in `app_secrets`; dort kann kein App-Nutzer lesen.
+
+In der App: **Einstellungen → Benachrichtigungen → Erlauben**, Uhrzeit wählen, mit „Test“ prüfen. Erinnert wird nur, wenn an dem Tag noch eine laufende Challenge offen ist. Auf dem iPhone geht das nur in der installierten App (Home-Bildschirm, iOS 16.4+).
+
 ## Als App installieren
 
 - **Android/Chrome:** In der App erscheint ein „Installieren“-Hinweis.
@@ -54,5 +66,5 @@ npm run dev
 
 ## Nächste Schritte
 
-- Push-Benachrichtigungen (tägliche Erinnerung, Kommentare, Reaktionen)
+- Push bei Kommentaren, Reaktionen und neuen Wetten, Wochenrückblick
 - Eigene interne Währung (Punkte) zusätzlich zu Euro

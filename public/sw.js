@@ -26,6 +26,8 @@ self.addEventListener('push', e => {
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
     data: { url: data.url || '/' },
+    tag: data.tag || undefined,
+    renotify: !!data.tag,
   }));
 });
 
