@@ -33,6 +33,9 @@ const U = id => S?.users.find(u => u.id === id) || { name: 'Jemand', color: '#A1
 const B = id => S.bets.find(b => b.id === id);
 const av = (id, cls = '') => { const u = U(id); return `<span class="av ${cls}" style="background:${esc(u.color)}" title="${esc(u.name)}">${esc((u.name[0] || '?').toUpperCase())}</span>`; };
 const pool = b => b.stake * b.participants.length;
+// Einsatz 0 € = Wette nur zum Spaß bzw. nur für sich selbst
+const perPerson = s => Number(s) > 0 ? `${euro(Number(s))} pro Person` : 'Ohne Einsatz';
+const potBox = (s, n) => Number(s) > 0 ? `<div class="pool"><b>${euro(Number(s) * n)}</b><small>im Pott</small></div>` : '';
 const isMine = b => b.participants.some(p => p.userId === S.me);
 const names = ids => ids.map(id => esc(U(id).name)).join(', ');
 
@@ -186,8 +189,8 @@ function betCard(b) {
   if (nc) tags.push(`<span class="tag">💬 ${nc}</span>`);
   return `<div class="card betcard" onclick="go('bet',{id:'${b.id}'})">
     <div class="bettop"><div class="ico">${esc(b.emoji)}</div>
-      <div><div class="bettitle">${esc(b.title)}</div><div class="sub">${euro(b.stake)} pro Person</div></div>
-      <div class="pool"><b>${euro(pool(b))}</b><small>im Pott</small></div></div>
+      <div><div class="bettitle">${esc(b.title)}</div><div class="sub">${perPerson(b.stake)}</div></div>
+      ${potBox(b.stake, b.participants.length)}</div>
     ${progress}
     <div class="meta">${tags.join('')}<div class="faces">${b.participants.slice(0, 5).map(p => av(p.userId, 'sm')).join('')}</div></div>
   </div>`;
@@ -241,7 +244,7 @@ function viewHome() {
   <div class="sub">${active.length} laufende Wette${active.length === 1 ? "" : "n"} · ${euro(active.reduce((s, b) => s + b.stake, 0))} Einsatz von dir</div>
   ${installHint()}
   ${myInvites().map(i => { const b = B(i.betId); return `<div class="card hint" style="align-items:center"><div class="ico">${esc(b.emoji)}</div>
-    <div style="flex:1;min-width:0"><b style="font-weight:600">${esc(U(i.by).name)} lädt dich ein</b><div class="sub">${esc(b.title)} · ${euro(b.stake)}</div></div>
+    <div style="flex:1;min-width:0"><b style="font-weight:600">${esc(U(i.by).name)} lädt dich ein</b><div class="sub">${esc(b.title)} · ${Number(b.stake) > 0 ? euro(b.stake) : 'ohne Einsatz'}</div></div>
     <button class="btn sm" onclick="openInviteJoin('${b.code}')">Ansehen</button><button class="btn sec2 sm" aria-label="Ablehnen" onclick="declineInvite('${b.id}')">✕</button></div>`; }).join('')}
   ${todos.length ? `<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
@@ -285,13 +288,13 @@ function viewBet() {
     ${me && ph === 'running' && !pStatus(b, me).out ? `<button class="btn ${me.checks[TODAY] ? 'sec2' : ''} full" onclick="toggleCheck('${b.id}')">${me.checks[TODAY] ? '✓ Heute erledigt · rückgängig' : 'Heute geschafft'}</button>` : ''}
     ${!b.end && ph !== 'done' ? `<div class="note">Keine feste Dauer: Die Challenge läuft, bis nur noch einer übrig ist. Noch dabei: <b>${names(w)}</b>.</div>` : ''}
     ${ph === 'done' ? `<div class="card winbox"><b>${w.length ? names(w) + ' ' + (w.length === 1 ? 'hat' : 'haben') + (b.end ? ' durchgehalten' : ' am längsten durchgehalten') : 'Niemand hat durchgehalten'}</b>
-      <div class="sub" style="margin-top:4px">${w.length ? `${euro(pool(b) / w.length)} pro Gewinner` : 'Alle bekommen ihren Einsatz zurück'}</div></div>` : ''}`;
+      <div class="sub" style="margin-top:4px">${!b.stake ? (w.length ? 'Geschafft!' : 'Diesmal hat es nicht geklappt') : w.length ? `${euro(pool(b) / w.length)} pro Gewinner` : 'Alle bekommen ihren Einsatz zurück'}</div></div>` : ''}`;
   } else {
     body = `<div class="sec"><h2>Tipps</h2></div><div class="card" style="padding-top:8px">
       ${b.options.map((o, i) => { const ps = b.participants.filter(p => p.pick === i);
         return `<div class="opt ${b.result === i ? 'win' : me && me.pick === i ? 'on' : ''}"><span style="flex:1;font-weight:500">${esc(o)}${b.result === i ? ' · Ergebnis' : ''}</span>
         <span class="faces">${ps.map(p => av(p.userId, 'sm')).join('')}</span><span class="sub" style="min-width:14px;text-align:right">${ps.length}</span></div>`; }).join('')}
-      ${ph === 'done' ? `<div class="note">${w.length ? `${names(w)} bekomm${w.length === 1 ? 't' : 'en'} je <b>${euro(pool(b) / w.length)}</b>.` : 'Niemand lag richtig, alle bekommen ihren Einsatz zurück.'}</div>` : ''}
+      ${ph === 'done' ? `<div class="note">${!b.stake ? (w.length ? `${names(w)} lag${w.length === 1 ? '' : 'en'} richtig.` : 'Niemand lag richtig.') : w.length ? `${names(w)} bekomm${w.length === 1 ? 't' : 'en'} je <b>${euro(pool(b) / w.length)}</b>.` : 'Niemand lag richtig, alle bekommen ihren Einsatz zurück.'}</div>` : ''}
     </div>
     ${me && me.pick == null && ph !== 'done' ? `<button class="btn acc full" onclick="openPick('${b.id}')">Tipp abgeben</button><div style="height:8px"></div>` : ''}
     ${ph !== 'done' && b.creator === S.me ? `<button class="btn full" onclick="openResolve('${b.id}')">Ergebnis eintragen</button>` : ''}
@@ -305,8 +308,8 @@ function viewBet() {
       <div class="sub">von ${esc(U(b.creator).name)} · ${period(b)}</div></div></div>
     ${b.desc ? `<p style="margin-top:12px;color:var(--ink2)">${esc(b.desc)}</p>` : ''}
     <div class="row" style="margin-top:14px">
-      <div class="stat"><b>${euro(pool(b))}</b><span class="sub">im Pott</span></div>
-      <div class="stat"><b>${euro(b.stake)}</b><span class="sub">Einsatz</span></div>
+      ${b.stake > 0 ? `<div class="stat"><b>${euro(pool(b))}</b><span class="sub">im Pott</span></div>
+      <div class="stat"><b>${euro(b.stake)}</b><span class="sub">Einsatz</span></div>` : `<div class="stat"><b>0 €</b><span class="sub">ohne Einsatz</span></div>`}
       <div class="stat"><b>${b.participants.length}</b><span class="sub">dabei</span></div>
     </div>
     ${ph !== 'done' ? `<div class="codebox"><div><div class="sub">Einladungscode</div><code>${esc(b.code)}</code></div><button class="btn sec2 sm" onclick="copyCode('${b.code}')">Link teilen</button></div>` : ''}
@@ -468,7 +471,7 @@ function viewCreate() {
   const lens = d.type === 'challenge' ? [[1, '1 Tag'], [7, '1 Woche'], [30, '30 Tage'], ['custom', 'Bis Datum'], ['open', 'Ohne Ende']] : [[1, 'Heute'], [2, 'Morgen'], ['custom', 'Eigenes Datum'], ['open', 'Ohne Datum']];
   const pl = planDates(d);
   const q = v => typeof v === 'string' ? `'${v}'` : v;
-  const stakes = [2, 5, 10, 20, 50];
+  const stakes = [0, 2, 5, 10, 20, 50];
   return `<h1>Neue Wette</h1><div class="sub">Danach bekommst du einen Code für deine Freunde.</div>
   <label class="f">Art</label>
   <div class="seg">
@@ -484,6 +487,7 @@ function viewCreate() {
   <label class="f">Einsatz pro Person</label>
   <div class="chips">${stakes.map(v => `<button class="chip ${d.stake === v ? 'on' : ''}" onclick="setD('stake',${v})">${v} €</button>`).join('')}
     <input class="in" style="width:100px;padding:6px 10px" type="number" inputmode="decimal" min="0" step="0.5" value="${stakes.includes(d.stake) ? '' : d.stake}" placeholder="Betrag" oninput="draft.stake=Math.max(0,+this.value||0)"></div>
+  ${d.stake === 0 ? '<div class="sub" style="margin-top:6px">Ohne Einsatz, z. B. für eine Challenge nur für dich.</div>' : ''}
   ${d.type === 'challenge' ? `
     <label class="f">Start</label>
     <div class="chips">${[['today', 'Heute'], ['past', 'Schon früher begonnen'], ['future', 'Später']].map(([v, l]) => `<button class="chip ${d.startMode === v ? 'on' : ''}" onclick="setStart('${v}')">${l}</button>`).join('')}</div>
@@ -546,7 +550,7 @@ async function createBet() {
   if (!id) return;
   draft = null;
   if (d.type === 'tipp') { go('bet', { id }); return openPick(id); }
-  go('bet', { id }); toast('Wette läuft. Lade jetzt deine Freunde ein.');
+  go('bet', { id }); toast(d.stake > 0 ? 'Wette läuft. Lade jetzt deine Freunde ein.' : 'Wette läuft. Viel Erfolg!');
 }
 
 /* ---------- Beitreten ---------- */
@@ -575,9 +579,9 @@ function viewJoin() {
   ${f ? `<div class="card" style="margin-top:12px">
       <div class="bettop"><div class="ico">${esc(f.emoji)}</div>
         <div><div class="bettitle">${esc(f.title)}</div><div class="sub">von ${esc(f.creator_name)} · ${f.type === 'tipp' ? 'Tipp-Wette' : 'Challenge'}</div></div>
-        <div class="pool"><b>${euro(Number(f.stake) * f.participant_count)}</b><small>im Pott</small></div></div>
+        ${potBox(f.stake, f.participant_count)}</div>
       ${f.descr ? `<p class="sub" style="margin-top:10px">${esc(f.descr)}</p>` : ''}
-      <div class="meta"><span class="tag">${euro(Number(f.stake))} pro Person</span><span class="tag">${f.participant_count} dabei</span>
+      <div class="meta"><span class="tag">${perPerson(f.stake)}</span><span class="tag">${f.participant_count} dabei</span>
         <span class="tag">${period({ type: f.type, start: f.start_date, end: f.end_date })}</span></div>
     </div>
     ${f.already_joined ? `<button class="btn full" onclick="go('bet',{id:'${f.id}'})">Du bist schon dabei · ansehen</button>` : done ? `<div class="note">Diese Wette ist schon vorbei.</div>` : `
@@ -588,7 +592,7 @@ function viewJoin() {
             <div class="note" style="margin-top:6px">Die ${diffDays(joinState.since, TODAY)} Tage seit dem ${fmtDate(joinState.since)} werden dir angerechnet.</div>` : ''}` : '')
         : `<label class="f">Dein Tipp</label>${f.options.map((o, i) => `<button class="opt ${joinState.pick === i ? 'on' : ''}" onclick="joinState.pick=${i};render()">${esc(o)}</button>`).join('')}`}
       <div style="height:16px"></div>
-      <button class="btn full" ${busy ? 'disabled' : ''} onclick="joinBet()">Beitreten · ${euro(Number(f.stake))}</button>`}` : ''}`;
+      <button class="btn full" ${busy ? 'disabled' : ''} onclick="joinBet()">Beitreten${Number(f.stake) > 0 ? ' · ' + euro(Number(f.stake)) : ''}</button>`}` : ''}`;
 }
 async function joinBet() {
   const f = joinState.found;
@@ -652,7 +656,7 @@ function viewSettings() {
   <div class="sec"><h2>Neue Wetten</h2></div>
   <div class="setgroup">
     <div class="setrow" style="display:block"><div class="lbl" style="margin-bottom:8px">Standard-Einsatz</div>
-      <div class="chips">${[2, 5, 10, 20, 50].map(v => `<button class="chip ${st.defStake === v ? 'on' : ''}" onclick="setSet('defStake',${v})">${v} €</button>`).join('')}</div></div>
+      <div class="chips">${[0, 2, 5, 10, 20, 50].map(v => `<button class="chip ${st.defStake === v ? 'on' : ''}" onclick="setSet('defStake',${v})">${v} €</button>`).join('')}</div></div>
     <div class="setrow" style="display:block"><div class="lbl" style="margin-bottom:8px">Standard-Joker</div>
       <div class="chips">${[0, 1, 2, 3].map(v => `<button class="chip ${st.defJokers === v ? 'on' : ''}" onclick="setSet('defJokers',${v})">${v}</button>`).join('')}</div></div>
   </div>
