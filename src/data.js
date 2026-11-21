@@ -11,6 +11,9 @@ const must = ({ data, error }) => { if (error) throw error; return data; };
 export async function loadState(meId) {
   // Fällige Wetten abrechnen, bevor geladen wird (Fehler hier sollen das Laden nicht blockieren)
   await sb.rpc('settle_my_due').then(() => {}, () => {});
+  // Aufgaben separat laden: Fehlt die Tabelle noch (Migration 0009 nicht ausgeführt), läuft der Rest trotzdem
+  const tasksP = sb.from('tasks').select('*').eq('user_id', meId).order('due').order('created_at')
+    .then(({ data, error }) => error ? null : data, () => null);
   const [wallet, txs, profiles, bets, parts, checks, feed, reactions, comments, friendships, viewers, invites] = await Promise.all([
     sb.from('wallets').select('points').eq('user_id', meId).maybeSingle(),
     sb.from('point_tx').select('*').eq('user_id', meId).order('id', { ascending: false }).limit(100),
@@ -64,7 +67,9 @@ export async function loadState(meId) {
   const outInvites = invites.filter(i => byBet[i.bet_id]).map(i => ({ betId: i.bet_id, userId: i.user_id, by: i.invited_by }));
   const points = wallet?.points ?? 0;
   const tx = txs.map(t => ({ id: t.id, amount: t.amount, kind: t.kind, betId: t.bet_id, betTitle: t.bet_title, other: t.other_user, otherName: t.other_name, note: t.note, day: t.day, ts: Date.parse(t.created_at) }));
-  return { me: meId, points, tx, users, bets: outBets, feed: outFeed, friends, incoming, outgoing, myCode, invites: outInvites };
+  const taskRows = await tasksP;
+  const tasks = taskRows && taskRows.map(t => ({ id: t.id, title: t.title, repeat: t.repeat, every: t.every_n, weekdays: t.weekdays || [], due: t.due, lastDone: t.last_done, prevDue: t.prev_due, doneAt: t.done_at }));
+  return { me: meId, tasks, points, tx, users, bets: outBets, feed: outFeed, friends, incoming, outgoing, myCode, invites: outInvites };
 }
 
 // ---------- Aktionen ----------
@@ -139,6 +144,10 @@ export const api = {
   async removeFriendship(fid) { must(await sb.from('friendships').delete().eq('id', fid)); },
   async updateProfile(id, fields) { must(await sb.from('profiles').update(fields).eq('id', id)); },
   async transfer(to, amount, note) { must(await sb.rpc('transfer_points', { p_to: to, p_amount: amount, p_note: note || '' })); },
+  // ---- Aufgaben (privat) ----
+  async addTask(t) { must(await sb.from('tasks').insert({ title: t.title, repeat: t.repeat, every_n: t.every || null, weekdays: t.weekdays?.length ? t.weekdays : null, due: t.due })); },
+  async updateTask(id, fields) { must(await sb.from('tasks').update(fields).eq('id', id)); },
+  async deleteTask(id) { must(await sb.from('tasks').delete().eq('id', id)); },
   async deleteAccount() { must(await sb.rpc('delete_my_account')); },
 };
 
