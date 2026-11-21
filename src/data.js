@@ -32,7 +32,7 @@ export async function loadState(meId) {
     const o = {
       id: b.id, code: b.code, type: b.type, emoji: b.emoji, title: b.title, desc: b.descr, creator: b.creator,
       stake: Number(b.stake), start: b.start_date, end: b.end_date, visibility: b.visibility || 'friends', viewers: [], jokers: b.jokers, sameGoal: b.same_goal,
-      options: b.options || [], result: b.result, created: Date.parse(b.created_at), participants: [], comments: [],
+      options: b.options || [], result: b.result, perWeek: b.per_week || null, created: Date.parse(b.created_at), participants: [], comments: [],
       settled: !!b.settled_at, winners: b.winners || null,
     };
     byBet[b.id] = o; return o;

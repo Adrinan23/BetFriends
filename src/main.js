@@ -52,7 +52,28 @@ const names = ids => ids.map(id => esc(U(id).name)).join(', ');
 // Tage bis "credit" stammen aus der Zeit vor der App und gelten als geschafft.
 const pStart = (b, p) => p.since || b.start;
 const done = (p, d) => !!p.checks[d] || (!!p.credit && d <= p.credit);
+// Wochenziel ("4× pro Woche"): Woche Mo–So, angebrochene Wochen mit kleinerem Ziel.
+// Bewertet wird eine Woche, sobald ihr letzter Tag vor heute liegt.
+const monday = d => { const x = parse(d), wd = (x.getDay() + 6) % 7; return addDays(d, -wd); };
+function weekInfo(b, p, d) {
+  const mon = monday(d), s = pStart(b, p);
+  const d0 = mon > s ? mon : s, d1 = b.end && b.end < addDays(mon, 6) ? b.end : addDays(mon, 6);
+  let n = 0; for (let x = d0; x <= d1; x = addDays(x, 1)) if (done(p, x)) n++;
+  return { target: Math.min(b.perWeek, Math.max(0, diffDays(d0, d1) + 1)), done: n, end: d1 };
+}
+function pStatusWeekly(b, p) {
+  let missed = 0, streak = 0;
+  for (let m = monday(pStart(b, p)); !(b.end && m > b.end); m = addDays(m, 7)) {
+    const w = weekInfo(b, p, m);
+    if (w.end >= TODAY) { if (w.done >= w.target) streak++; break; }
+    if (w.done < w.target) { missed++; streak = 0; } else streak++;
+  }
+  const week = weekInfo(b, p, TODAY > (b.end || TODAY) ? b.end : TODAY);
+  return { missed, out: missed > (b.jokers || 0), streak, week };
+}
+const streakText = (b, n) => b.perWeek ? `${n} ${n === 1 ? 'Woche' : 'Wochen'} geschafft` : `${n} Tage Serie`;
 function pStatus(b, p) {
+  if (b.perWeek) return pStatusWeekly(b, p);
   const last = b.end && TODAY > b.end ? b.end : addDays(TODAY, -1);
   const start = pStart(b, p);
   let missed = 0;
@@ -155,14 +176,15 @@ function toggleCheck(betId) {
     run(() => api.check(betId, S.me, TODAY).then(() => true)).then(ok => {
       if (!ok) return;
       const gain = S.points - before;
-      gain > 0 ? reward(gain, `${streak} Tage Serie, weiter so`) : toast(`Erledigt. ${streak} Tage am Stück`);
+      const msg = b.perWeek ? weekLine(b, p) : `${streak} Tage Serie`;
+      gain > 0 ? reward(gain, `${msg}, weiter so`) : toast(`Erledigt. ${msg}`);
     });
   }
 }
 function checkAll() {
   const open = S.bets.filter(b => b.type === 'challenge' && betPhase(b) === 'running')
     .map(b => ({ b, p: b.participants.find(p => p.userId === S.me) }))
-    .filter(x => x.p && !pStatus(x.b, x.p).out && !x.p.checks[TODAY]);
+    .filter(x => x.p && !x.b.perWeek && !pStatus(x.b, x.p).out && !x.p.checks[TODAY]);
   if (!open.length) return;
   open.forEach(x => { x.p.checks[TODAY] = true; }); view.pop = open.map(x => x.b.id); render(); view.pop = null; ringAt(open.map(x => x.b.id));
   const before = S.points;
@@ -216,7 +238,7 @@ function betCard(b) {
   if (b.type === 'challenge') {
     if (b.end) progress = `<div class="bar"><i style="width:${Math.round(dayIndex(b) / totalDays(b) * 100)}%"></i></div>`;
     tags.push(ph === 'done' ? `<span class="tag">Beendet</span>` : ph === 'soon' ? `<span class="tag">Startet ${fmtDate(b.start)}</span>` : b.end ? `<span class="tag">Tag ${dayIndex(b)} / ${totalDays(b)}</span>` : `<span class="tag acc">Tag ${dayIndex(b)} · ohne Ende</span>`);
-    if (mine && ph !== 'soon') { const st = pStatus(b, mine); tags.push(st.out ? `<span class="tag bad">Ausgeschieden</span>` : `<span class="tag ok">${st.streak} Tage Serie</span>`); }
+    if (mine && ph !== 'soon') { const st = pStatus(b, mine); tags.push(st.out ? `<span class="tag bad">Ausgeschieden</span>` : `<span class="tag ok">${b.perWeek ? `${st.week.done}/${st.week.target} diese Woche` : streakText(b, st.streak)}</span>`); }
   } else {
     tags.push(ph === 'done' ? `<span class="tag">Aufgelöst</span>` : `<span class="tag acc">Tipp · ${!b.end ? 'offen' : b.end === TODAY ? 'heute' : fmtDate(b.end)}</span>`);
     if (ph === 'done' && mine) tags.push(mine.pick === b.result ? `<span class="tag ok">Gewonnen</span>` : `<span class="tag bad">Verloren</span>`);
@@ -225,7 +247,7 @@ function betCard(b) {
   if (nc) tags.push(`<span class="tag">💬 ${nc}</span>`);
   return `<div class="card betcard" onclick="go('bet',{id:'${b.id}'})">
     <div class="bettop"><div class="ico">${esc(b.emoji)}</div>
-      <div><div class="bettitle">${esc(b.title)}</div><div class="sub">${perPerson(b.stake)}</div></div>
+      <div><div class="bettitle">${esc(b.title)}</div><div class="sub">${b.perWeek ? b.perWeek + '× pro Woche · ' : ''}${perPerson(b.stake)}</div></div>
       ${potBox(b.stake, b.participants.length)}</div>
     ${progress}
     <div class="meta">${tags.join('')}<div class="faces">${b.participants.slice(0, 5).map(p => av(p.userId, 'sm')).join('')}</div></div>
@@ -270,11 +292,18 @@ function installHint() {
 async function doInstall() { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; render(); }
 
 /* ===================== Ansichten ===================== */
+function weekLine(b, p) {
+  const w = pStatus(b, p).week, left = diffDays(TODAY, w.end) + 1, need = w.target - w.done;
+  if (need <= 0) return `Wochenziel erreicht (${w.done}/${w.target})`;
+  return `diese Woche ${w.done}/${w.target}${need >= left && !p.checks[TODAY] ? ' · heute nötig' : ''}`;
+}
 function viewHome() {
   const mine = S.bets.filter(isMine);
   const todos = mine.filter(b => b.type === 'challenge' && betPhase(b) === 'running').map(b => ({ b, p: b.participants.find(p => p.userId === S.me) })).filter(x => !pStatus(x.b, x.p).out);
   const active = mine.filter(b => betPhase(b) !== 'done'), done = mine.filter(b => betPhase(b) === 'done');
-  const left = todos.filter(x => !x.p.checks[TODAY]).length;
+  // Wochenziel: offen nur, solange das Wochenziel noch nicht erreicht ist
+  const isOpen = x => !x.p.checks[TODAY] && (!x.b.perWeek || pStatus(x.b, x.p).week.done < pStatus(x.b, x.p).week.target);
+  const left = todos.filter(isOpen).length;
   return `
   <h1>Hallo ${esc(U(S.me).name)}</h1>
   <div class="sub">${active.length} laufende Wette${active.length === 1 ? "" : "n"} · ${pts(active.reduce((s, b) => s + Number(b.stake), 0))} im Einsatz</div>
@@ -286,10 +315,10 @@ function viewHome() {
     <button class="btn sm" onclick="openInviteJoin('${b.code}')">Ansehen</button><button class="btn sec2 sm" aria-label="Ablehnen" onclick="declineInvite('${b.id}')">✕</button></div>`; }).join('')}
   ${todos.length ? `<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-      <h2>Heute</h2><div style="display:flex;gap:6px;align-items:center">${left > 1 ? `<button class="btn sec2 sm" onclick="checkAll()">Alle abhaken</button>` : ''}<span class="tag ${left ? 'warn' : 'ok'}">${left ? left + ' offen' : 'Alles erledigt'}</span></div></div>
+      <h2>Heute</h2><div style="display:flex;gap:6px;align-items:center">${todos.filter(x => !x.b.perWeek && !x.p.checks[TODAY]).length > 1 ? `<button class="btn sec2 sm" onclick="checkAll()">Alle abhaken</button>` : ''}<span class="tag ${left ? 'warn' : 'ok'}">${left ? left + ' offen' : 'Alles erledigt'}</span></div></div>
     ${todos.map(({ b, p }) => `<div class="todo">
       <button class="check ${p.checks[TODAY] ? 'on' : ''} ${[].concat(view.pop).includes(b.id) ? 'pop' : ''}" data-bet="${b.id}" onclick="toggleCheck('${b.id}')" aria-label="Abhaken">${p.checks[TODAY] ? '✓' : ''}</button>
-      <div style="flex:1;cursor:pointer" onclick="go('bet',{id:'${b.id}'})"><div style="font-weight:500">${esc(p.goal)}</div><div class="sub">${esc(b.title)} · ${pStatus(b, p).streak} Tage Serie</div></div>
+      <div style="flex:1;cursor:pointer" onclick="go('bet',{id:'${b.id}'})"><div style="font-weight:500">${esc(p.goal)}</div><div class="sub">${esc(b.title)} · ${b.perWeek ? weekLine(b, p) : streakText(b, pStatus(b, p).streak)}</div></div>
     </div>`).join('')}
   </div>` : ''}
   <div class="sec"><h2>Laufende Wetten</h2><span class="sub">${active.length}</span></div>
@@ -308,20 +337,21 @@ function viewBet() {
     for (let d = first; d <= until; d = addDays(d, 1)) days.push(d);
     const anyCredit = b.participants.some(p => p.credit);
     const shown = days.length > 60 ? days.slice(-60) : days;
-    body = `<div class="sec"><h2>Teilnehmer</h2><span class="sub">${b.jokers ? b.jokers + ' Joker pro Person' : 'Keine Joker'}</span></div>
+    body = `<div class="sec"><h2>Teilnehmer</h2><span class="sub">${b.jokers ? b.jokers + ' Joker' + (b.perWeek ? '-Woche' + (b.jokers > 1 ? 'n' : '') : '') + ' p. P.' : 'Keine Joker'}</span></div>
     <div class="card">${b.participants.map(p => { const st = pStatus(b, p); let used = 0;
       return `<div class="prow">${av(p.userId)}<div style="flex:1;min-width:0">
         <div style="display:flex;justify-content:space-between;gap:8px"><b style="font-weight:600">${esc(U(p.userId).name)}</b>
-          ${ph === 'soon' ? '' : st.out ? `<span class="tag bad">Ausgeschieden</span>` : `<span class="tag ok">${st.streak} Tage</span>`}</div>
+          ${ph === 'soon' ? '' : st.out ? `<span class="tag bad">Ausgeschieden</span>` : `<span class="tag ok">${b.perWeek ? `${st.week.done}/${st.week.target} diese Woche` : st.streak + ' Tage'}</span>`}</div>
         <div class="sub">${esc(p.goal)}${p.credit ? ` · dabei seit ${fmtDate(pStart(b, p))}` : ''}</div>
         <div class="grid">${shown.map(d => { let c = '';
           if (d < pStart(b, p)) c = 'na';
           else if (!p.checks[d] && p.credit && d <= p.credit) c = 'ok pre';
+          else if (b.perWeek) c = p.checks[d] ? 'ok' : '';
           else if (d < TODAY) c = p.checks[d] ? 'ok' : (used++ < (b.jokers || 0) ? 'joker' : 'miss');
           else if (d === TODAY && p.checks[d]) c = 'ok';
           return `<span class="day ${c} ${d === TODAY ? 'today' : ''}" title="${fmtDate(d)}"></span>`; }).join('')}</div>
       </div></div>`; }).join('')}
-      <div class="legend"><span style="--c:var(--ok)">geschafft</span><span style="--c:#F5B53F">Joker</span><span style="--c:var(--bad)">verpasst</span>${anyCredit ? '<span style="--c:var(--ok);opacity:.5">vor der App</span>' : ''}</div>
+      <div class="legend"><span style="--c:var(--ok)">geschafft</span>${b.perWeek ? '' : '<span style="--c:#F5B53F">Joker</span><span style="--c:var(--bad)">verpasst</span>'}${anyCredit ? '<span style="--c:var(--ok);opacity:.5">vor der App</span>' : ''}</div>
     </div>
     ${me && ph === 'running' && !pStatus(b, me).out ? `<button class="btn ${me.checks[TODAY] ? 'sec2' : ''} full" onclick="toggleCheck('${b.id}')">${me.checks[TODAY] ? '✓ Heute erledigt · rückgängig' : 'Heute geschafft'}</button>` : ''}
     ${!b.end && ph !== 'done' ? `<div class="note">Keine feste Dauer: Die Challenge läuft, bis nur noch einer übrig ist. Noch dabei: <b>${names(w)}</b>.</div>` : ''}
@@ -415,7 +445,7 @@ function openEdit(betId) {
     ${ch ? `<label class="f">Ende</label>
       <div class="chips"><button class="chip ${!e.open ? 'on' : ''}" onclick="betEdit.open=false;betEdit.end=betEdit.end||'${addDays(minEnd, 7)}';openEdit('${betId}')">Bis Datum</button><button class="chip ${e.open ? 'on' : ''}" onclick="betEdit.open=true;openEdit('${betId}')">Ohne Ende</button></div>
       ${!e.open ? `<input class="in" style="margin-top:8px" type="date" min="${minEnd}" value="${e.end || ''}" onchange="betEdit.end=this.value">` : ''}
-      <label class="f">Joker (Tage, die man verpassen darf)</label><div class="chips">${[0, 1, 2, 3].map(n => `<button class="chip ${e.jokers === n ? 'on' : ''}" onclick="betEdit.jokers=${n};openEdit('${betId}')">${n}</button>`).join('')}</div>` : ''}
+      <label class="f">Joker (${b.perWeek ? 'Wochen' : 'Tage'}, die man verpassen darf)</label><div class="chips">${[0, 1, 2, 3].map(n => `<button class="chip ${e.jokers === n ? 'on' : ''}" onclick="betEdit.jokers=${n};openEdit('${betId}')">${n}</button>`).join('')}</div>` : ''}
     ${b.participants.length > 1 ? '<div class="note">Alle Mitspieler sehen die Änderungen sofort.</div>' : ''}
     <div style="height:16px"></div>
     <div class="row"><button class="btn sec2" onclick="betEdit=null;modal('')">Abbrechen</button><button class="btn" onclick="saveEdit()">Speichern</button></div>
@@ -551,7 +581,7 @@ function viewBoard() {
   ${items.length ? `<div class="board">${items.map(({ b, p, st }) => `<div class="cb" onclick="go('bet',{id:'${b.id}'})">
       <div style="display:flex;align-items:center;gap:8px">${av(p.userId, 'sm')}<span style="font-weight:500;font-size:14px">${esc(U(p.userId).name)}</span>${p.checks[TODAY] ? '<span class="tag ok" style="margin-left:auto">✓ heute</span>' : ''}</div>
       <div class="goal">${esc(p.goal)}</div>
-      ${st.out ? `<span class="tag bad">Ausgeschieden</span>` : `<div class="streak">${st.streak}</div><div class="sub">Tage Serie</div>`}
+      ${st.out ? `<span class="tag bad">Ausgeschieden</span>` : b.perWeek ? `<div class="streak">${st.week.done}/${st.week.target}</div><div class="sub">diese Woche</div>` : `<div class="streak">${st.streak}</div><div class="sub">Tage Serie</div>`}
     </div>`).join('')}</div>` : '<div class="card empty">Gerade keine Challenges. Lade Freunde zu einer Wette ein, dann tauchen ihre Challenges hier auf.</div>'}
   <div class="sec"><h2>Feed</h2></div>
   <div class="card">${S.feed.slice(0, 40).map(feedItem).join('') || '<div class="empty">Noch nichts los.</div>'}</div>
@@ -560,7 +590,7 @@ function viewBoard() {
 
 /* ---------- Neue Wette ---------- */
 let draft = null;
-function newDraft() { draft = { vis: getSet().defVis, viewers: [], type: 'challenge', title: '', desc: '', emoji: '🔥', stake: getSet().defStake, len: 7, startMode: 'today', from: addDays(TODAY, -28), to: addDays(TODAY, 13), jokers: getSet().defJokers, goal: '', sameGoal: false, options: ['', ''] }; }
+function newDraft() { draft = { vis: getSet().defVis, viewers: [], type: 'challenge', title: '', desc: '', emoji: '🔥', stake: getSet().defStake, len: 7, startMode: 'today', from: addDays(TODAY, -28), to: addDays(TODAY, 13), jokers: getSet().defJokers, perWeek: 0, goal: '', sameGoal: false, options: ['', ''] }; }
 function viewCreate() {
   if (!draft) newDraft();
   const d = draft, emos = d.type === 'challenge' ? ['🔥', '👟', '🚭', '🍺', '💪', '🥗', '📵', '📚', '🧘', '💤'] : ['⚽', '🍕', '🎮', '🏀', '🎤', '🎲', '🍻', '💘', '🏎️', '🌧️'];
@@ -571,7 +601,7 @@ function viewCreate() {
   return `<h1>Neue Wette</h1><div class="sub">Danach bekommst du einen Code für deine Freunde.</div>
   <label class="f">Art</label>
   <div class="seg">
-    <button class="segbtn ${d.type === 'challenge' ? 'on' : ''}" onclick="setD('type','challenge')"><b>Challenge</b><small>Jeden Tag abhaken, wer durchhält gewinnt</small></button>
+    <button class="segbtn ${d.type === 'challenge' ? 'on' : ''}" onclick="setD('type','challenge')"><b>Challenge</b><small>Täglich oder X-mal pro Woche, wer durchhält gewinnt</small></button>
     <button class="segbtn ${d.type === 'tipp' ? 'on' : ''}" onclick="setD('type','tipp')"><b>Tipp-Wette</b><small>Wer richtig tippt, gewinnt</small></button>
   </div>
   <label class="f">Titel</label>
@@ -598,7 +628,10 @@ function viewCreate() {
   ${d.type === 'challenge' && d.len !== 'open' ? `<div class="note" style="margin-top:6px">${pl.end < TODAY ? '<span style="color:var(--bad)">Das Ende liegt schon in der Vergangenheit. Wähl eine längere Dauer oder „Ohne Ende“.</span>' : `${fmtDate(pl.start)} bis ${fmtDate(pl.end)} · ${diffDays(pl.start, pl.end) + 1} Tage`}</div>` : ''}
   ${d.len === 'open' ? `<div class="note" style="margin-top:8px">${d.type === 'challenge' ? 'Kein Enddatum: Jeder hakt täglich ab, und wer als Letzter übrig bleibt, gewinnt den Pott.' : 'Das Ergebnis wird eingetragen, wann immer es feststeht.'}</div>` : ''}
   ${d.type === 'challenge' ? `
-    <label class="f">Joker (Tage, die man verpassen darf)</label>
+    <label class="f">Wie oft?</label>
+    <div class="chips"><button class="chip ${!d.perWeek ? 'on' : ''}" onclick="setD('perWeek',0)">Jeden Tag</button>${[1, 2, 3, 4, 5, 6].map(v => `<button class="chip ${d.perWeek === v ? 'on' : ''}" onclick="setD('perWeek',${v})">${v}× pro Woche</button>`).join('')}</div>
+    ${d.perWeek ? `<div class="note" style="margin-top:6px">Die Woche geht von Montag bis Sonntag. Du hakst nur an den Tagen ab, an denen du es machst. Ruhetage kosten nichts, gezählt wird am Ende der Woche.</div>` : ''}
+    <label class="f">Joker (${d.perWeek ? 'Wochen' : 'Tage'}, die man verpassen darf)</label>
     <div class="chips">${[0, 1, 2, 3].map(v => `<button class="chip ${d.jokers === v ? 'on' : ''}" onclick="setD('jokers',${v})">${v}</button>`).join('')}</div>
     <label class="f">Ziel</label>
     <div class="chips"><button class="chip ${!d.sameGoal ? 'on' : ''}" onclick="setD('sameGoal',false)">Jeder sein eigenes</button><button class="chip ${d.sameGoal ? 'on' : ''}" onclick="setD('sameGoal',true)">Alle das gleiche</button></div>
@@ -639,7 +672,7 @@ async function createBet() {
   const { start, end } = planDates(d);
   if (end && end < TODAY) return toast('Das Ende liegt in der Vergangenheit');
   const bet = { type: d.type, emoji: d.emoji, title: d.title.trim(), descr: d.desc.trim(), stake: d.stake, start_date: start, end_date: end,
-    jokers: d.type === 'challenge' ? d.jokers : 0, same_goal: d.type === 'challenge' && d.sameGoal, options: d.type === 'tipp' ? opts : [] };
+    jokers: d.type === 'challenge' ? d.jokers : 0, per_week: d.type === 'challenge' && d.perWeek ? d.perWeek : null, same_goal: d.type === 'challenge' && d.sameGoal, options: d.type === 'tipp' ? opts : [] };
   const mine = d.type === 'challenge' ? { goal: d.goal.trim(), since: start, credited_until: start < TODAY ? addDays(TODAY, -1) : null } : {};
   if (d.vis === 'selected' && !d.viewers.length) return toast('Wähl mindestens einen Freund aus');
   if (d.stake > S.points) return toast(`Du hast nur ${pts(S.points)}`);
@@ -679,7 +712,7 @@ function viewJoin() {
         <div><div class="bettitle">${esc(f.title)}</div><div class="sub">von ${esc(f.creator_name)} · ${f.type === 'tipp' ? 'Tipp-Wette' : 'Challenge'}</div></div>
         ${potBox(f.stake, f.participant_count)}</div>
       ${f.descr ? `<p class="sub" style="margin-top:10px">${esc(f.descr)}</p>` : ''}
-      <div class="meta"><span class="tag">${perPerson(f.stake)}</span><span class="tag">${f.participant_count} dabei</span>
+      <div class="meta">${f.per_week ? `<span class="tag acc">${f.per_week}× pro Woche</span>` : ''}<span class="tag">${perPerson(f.stake)}</span><span class="tag">${f.participant_count} dabei</span>
         <span class="tag">${period({ type: f.type, start: f.start_date, end: f.end_date })}</span></div>
     </div>
     ${f.already_joined ? `<button class="btn full" onclick="go('bet',{id:'${f.id}'})">Du bist schon dabei · ansehen</button>` : done ? `<div class="note">Diese Wette ist schon vorbei.</div>` : `
@@ -832,6 +865,7 @@ function openRules() {
     <div class="card"><h2>Challenge</h2><p class="sub" style="margin-top:4px">Jeder hakt täglich ab. Verpasste Tage werden erst mit Jokern ausgeglichen, danach ist man raus. Alle, die bis zum Ende durchhalten, teilen sich den Pott.</p></div>
     <div class="card"><h2>Challenge ohne Ende</h2><p class="sub" style="margin-top:4px">Läuft, bis nur noch einer übrig ist. Wer als Letzter durchhält, gewinnt den Pott.</p></div>
     <div class="card"><h2>Tipp-Wette</h2><p class="sub" style="margin-top:4px">Jeder gibt einen Tipp ab. Wer die Wette erstellt hat, trägt das Ergebnis ein. Alle mit dem richtigen Tipp teilen sich den Pott.</p></div>
+    <div class="card"><h2>Challenge mit Wochenziel</h2><p class="sub" style="margin-top:4px">Z. B. 4× pro Woche ins Gym. Die Woche geht von Montag bis Sonntag, abgehakt wird nur an den Tagen, an denen man es macht. Wer das Wochenziel verfehlt, verbraucht einen Joker, danach ist man raus.</p></div>
     <div class="card"><h2>Abhaken</h2><p class="sub" style="margin-top:4px">Abhaken geht nur für heute. Wer einen Tag vergisst, verbraucht einen Joker.</p></div>
     <div class="card"><h2>Punkte</h2><p class="sub" style="margin-top:4px">Jeder startet mit 1.000 Punkten. Beim Beitreten wird der Einsatz abgezogen und landet im Pott. Am Ende teilen sich die Gewinner den Pott. Gewinnt niemand, gibt es den Einsatz zurück. Allein: geschafft = Einsatz zurück, nicht geschafft = weg.</p></div>
     <div class="card"><h2>Belohnung</h2><p class="sub" style="margin-top:4px">Für Challenges, die du allein machst, gibt es bis zu 10 Punkte pro Tag, aufgeteilt auf alle deine Solo-Challenges.</p></div>
