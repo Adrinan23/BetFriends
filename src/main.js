@@ -987,6 +987,126 @@ function viewSetup() {
 }
 
 /* ===================== Render ===================== */
+/* ===================== Aufgaben (private Liste) ===================== */
+// Zwei Ansichten: "Wetten" (alles bisherige) und "Aufgaben". Gemerkt pro Gerät.
+let mode = lsGet('bf-mode') === 'tasks' ? 'tasks' : 'bets';
+function setMode(m) { mode = m; lsSet('bf-mode', m); if (m === 'bets' && view.name === 'tasks') view = { name: 'home' }; render(); window.scrollTo(0, 0); }
+const WD = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+const isoWd = d => (parse(d).getDay() + 6) % 7 + 1; // 1 = Mo … 7 = So
+// Nächster Fälligkeitstag nach dem Tag "from" (für wiederkehrende Aufgaben)
+function nextDue(t, from) {
+  if (t.repeat === 'daily') return addDays(from, 1);
+  if (t.repeat === 'every') return addDays(from, t.every);
+  if (t.repeat === 'weekdays') { for (let i = 1; i <= 7; i++) { const d = addDays(from, i); if (t.weekdays.includes(isoWd(d))) return d; } }
+  return addDays(from, 1);
+}
+// Erster Fälligkeitstag ab "from" (inklusive), für neue Aufgaben an Wochentagen
+function firstDue(t, from) { return t.repeat === 'weekdays' && !t.weekdays.includes(isoWd(from)) ? nextDue(t, from) : from; }
+function repeatText(t) {
+  if (t.repeat === 'daily') return 'Täglich';
+  if (t.repeat === 'every') return t.every === 7 ? 'Jede Woche' : `Alle ${t.every} Tage`;
+  if (t.repeat === 'weekdays') return t.weekdays.length === 7 ? 'Täglich' : [...t.weekdays].sort().map(n => WD[n - 1]).join(', ');
+  return '';
+}
+const dueText = d => d === TODAY ? 'heute' : d === addDays(TODAY, 1) ? 'morgen' : diffDays(TODAY, d) < 7 ? parse(d).toLocaleDateString('de-DE', { weekday: 'long' }) : fmtDate(d);
+const tasksOpenToday = () => (S?.tasks || []).filter(t => !t.doneAt && t.due <= TODAY).length;
+
+function viewTasks() {
+  if (!S.tasks) return `<h1>Aufgaben</h1><div class="card empty">Die Aufgabenliste ist noch nicht eingerichtet.<br>Bitte <b>0009_aufgaben.sql</b> im Supabase SQL Editor ausführen.</div>`;
+  const today = S.tasks.filter(t => (!t.doneAt && t.due <= TODAY) || t.lastDone === TODAY)
+    .sort((a, b) => (a.lastDone === TODAY) - (b.lastDone === TODAY) || a.due.localeCompare(b.due));
+  const later = S.tasks.filter(t => !t.doneAt && t.due > TODAY && t.lastDone !== TODAY).sort((a, b) => a.due.localeCompare(b.due));
+  const open = today.filter(t => t.lastDone !== TODAY).length;
+  const row = (t, isToday) => {
+    const on = t.lastDone === TODAY, late = !on && t.due < TODAY;
+    const info = [repeatText(t), on ? '' : late ? (diffDays(t.due, TODAY) === 1 ? 'seit gestern' : `seit ${diffDays(t.due, TODAY)} Tagen`) : ''].filter(Boolean).join(' · ');
+    return `<div class="todo">
+      ${isToday ? `<button class="check ${on ? 'on' : ''}" onclick="toggleTask('${t.id}')" aria-label="Abhaken">${on ? '✓' : ''}</button>` : `<span class="tdate">${dueText(t.due)}</span>`}
+      <div style="flex:1;min-width:0;cursor:pointer" onclick="openTask('${t.id}')"><div style="font-weight:500;${on ? 'text-decoration:line-through;color:var(--muted)' : ''}">${esc(t.title)}</div>${info ? `<div class="sub" style="${late ? 'color:var(--warn)' : ''}">${info}</div>` : ''}</div>
+    </div>`;
+  };
+  return `
+  <h1>Aufgaben</h1>
+  <div class="sub">Nur für dich sichtbar · ${open ? open + ' offen heute' : 'heute alles erledigt'}</div>
+  <form class="cform card" style="display:flex;gap:8px;padding:10px" onsubmit="quickTask(event)">
+    <input class="in" id="tq" maxlength="100" placeholder="Neue Aufgabe für heute…" autocomplete="off">
+    <button class="btn sm">+</button>
+  </form>
+  <button class="cbtn" style="margin:0 2px" onclick="openTask()">Wiederkehrend oder für später planen</button>
+  <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><h2>Heute</h2><span class="tag ${open ? 'warn' : 'ok'}">${open ? open + ' offen' : 'Alles erledigt'}</span></div>
+    ${today.length ? today.map(t => row(t, true)).join('') : '<div class="sub" style="padding:8px 0">Für heute steht nichts an.</div>'}</div>
+  ${later.length ? `<div class="sec"><h2>Demnächst</h2><span class="sub">${later.length}</span></div><div class="card">${later.map(t => row(t, false)).join('')}</div>` : ''}`;
+}
+
+// Optimistisch: sofort anzeigen, im Hintergrund speichern, bei Fehler neu laden
+async function saveTask(fn, msg) {
+  render();
+  try { await fn(); if (msg) toast(msg); } catch (e) { console.error(e); toast(niceError(e)); refresh(); }
+}
+function toggleTask(id) {
+  const t = S.tasks.find(t => t.id === id); if (!t) return;
+  if (t.lastDone === TODAY) { // rückgängig
+    Object.assign(t, { due: t.prevDue || t.due, lastDone: null, doneAt: null });
+    return saveTask(() => api.updateTask(id, { due: t.due, last_done: null, done_at: null }));
+  }
+  const f = { prev_due: t.due, last_done: TODAY };
+  if (t.repeat === 'once') f.done_at = new Date().toISOString(); else f.due = nextDue(t, TODAY);
+  Object.assign(t, { prevDue: f.prev_due, lastDone: TODAY, doneAt: f.done_at || null, due: f.due || t.due });
+  saveTask(() => api.updateTask(id, f), t.repeat === 'once' ? 'Erledigt' : `Erledigt. Nächstes Mal: ${dueText(t.due)}`);
+}
+function quickTask(ev) {
+  ev.preventDefault();
+  const el = $('#tq'), title = el.value.trim(); if (!title) return;
+  el.value = '';
+  run(() => api.addTask({ title, repeat: 'once', due: TODAY }));
+}
+
+let taskEdit = null;
+function openTask(id) {
+  if (id !== undefined || !taskEdit) {
+    const t = id && S.tasks.find(t => t.id === id);
+    taskEdit = t ? { id, title: t.title, repeat: t.repeat, every: t.every || 2, weekdays: [...t.weekdays], due: t.due }
+      : { id: null, title: '', repeat: 'once', every: 2, weekdays: [isoWd(TODAY)], due: TODAY };
+  }
+  const e = taskEdit, q = v => `'${v}'`;
+  const kinds = [['once', 'Einmalig'], ['daily', 'Täglich'], ['every', 'Alle X Tage'], ['weekdays', 'Wochentage']];
+  modal(`<h1>${e.id ? 'Aufgabe bearbeiten' : 'Neue Aufgabe'}</h1>
+    <label class="f">Was?</label><input class="in" id="tt" maxlength="100" value="${esc(e.title)}" oninput="taskEdit.title=this.value" placeholder="z. B. Pflanzen gießen">
+    <label class="f">Wie oft?</label><div class="chips">${kinds.map(([v, l]) => `<button class="chip ${e.repeat === v ? 'on' : ''}" onclick="taskEdit.repeat=${q(v)};openTask()">${l}</button>`).join('')}</div>
+    ${e.repeat === 'every' ? `<label class="f">Alle wie viele Tage?</label><div class="chips">${[2, 3, 4, 5, 7, 14, 30].map(n => `<button class="chip ${e.every === n ? 'on' : ''}" onclick="taskEdit.every=${n};openTask()">${n === 7 ? '1 Woche' : n === 14 ? '2 Wochen' : n === 30 ? '30 Tage' : n + ' Tage'}</button>`).join('')}</div>` : ''}
+    ${e.repeat === 'weekdays' ? `<label class="f">An welchen Tagen?</label><div class="chips">${WD.map((l, i) => `<button class="chip ${e.weekdays.includes(i + 1) ? 'on' : ''}" onclick="toggleTaskWd(${i + 1})">${l}</button>`).join('')}</div>` : ''}
+    ${e.repeat !== 'weekdays' ? `<label class="f">${e.repeat === 'once' ? 'Wann?' : 'Ab wann?'}</label>
+      <div class="chips"><button class="chip ${e.due === TODAY ? 'on' : ''}" onclick="taskEdit.due=${q(TODAY)};openTask()">Heute</button><button class="chip ${e.due === addDays(TODAY, 1) ? 'on' : ''}" onclick="taskEdit.due=${q(addDays(TODAY, 1))};openTask()">Morgen</button>
+      <input class="in" type="date" style="width:auto;flex:1" value="${e.due}" min="${e.id && e.due < TODAY ? e.due : TODAY}" onchange="if(this.value){taskEdit.due=this.value;openTask()}"></div>` : ''}
+    <div class="sub" style="margin-top:10px">Nicht erledigt? Dann bleibt die Aufgabe einfach unter „Heute“ stehen, bis du sie abhakst.</div>
+    <div style="display:flex;gap:8px;margin-top:18px">
+      ${e.id ? `<button class="btn sec2" onclick="deleteTask()">Löschen</button>` : ''}
+      <button class="btn" style="flex:1" onclick="submitTask()">${e.id ? 'Speichern' : 'Anlegen'}</button></div>`);
+  if (id === undefined && !e.id) setTimeout(() => { const el = $('#tt'); if (el && !el.value) el.focus(); }, 30);
+}
+function toggleTaskWd(n) {
+  const w = taskEdit.weekdays; taskEdit.weekdays = w.includes(n) ? w.filter(x => x !== n) : [...w, n].sort();
+  openTask();
+}
+function submitTask() {
+  const e = taskEdit, title = e.title.trim();
+  if (!title) return toast('Gib der Aufgabe einen Namen');
+  if (e.repeat === 'weekdays' && !e.weekdays.length) return toast('Wähl mindestens einen Tag');
+  const t = { title, repeat: e.repeat, every: e.repeat === 'every' ? e.every : null, weekdays: e.repeat === 'weekdays' ? e.weekdays : [] };
+  // Wochentage: nächster passender Tag ab heute; sonst das gewählte Datum
+  const old = e.id && S.tasks.find(x => x.id === e.id);
+  t.due = e.repeat === 'weekdays' ? firstDue(t, old?.lastDone === TODAY ? addDays(TODAY, 1) : TODAY) : e.due;
+  taskEdit = null; modal('');
+  if (!e.id) return run(() => api.addTask(t), 'Aufgabe angelegt');
+  run(() => api.updateTask(e.id, { title: t.title, repeat: t.repeat, every_n: t.every, weekdays: t.weekdays.length ? t.weekdays : null, due: t.due }), 'Gespeichert');
+}
+function deleteTask() {
+  const id = taskEdit?.id; taskEdit = null; modal('');
+  if (id) run(() => api.deleteTask(id), 'Aufgabe gelöscht');
+}
+Object.defineProperty(window, 'taskEdit', { get: () => taskEdit, set: v => { taskEdit = v; } });
+Object.assign(window, { setMode, toggleTask, quickTask, openTask, toggleTaskWd, submitTask, deleteTask });
+
 const ICONS = {
   home: '<svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>',
   board: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.8c2 .7 3.2 2.5 3.6 5.2"/></svg>',
@@ -1000,10 +1120,13 @@ function render() {
   if (!configured) { $('#app').innerHTML = viewSetup(); navEl.style.display = 'none'; return; }
   if (!session) { $('#app').innerHTML = viewAuth(); navEl.style.display = 'none'; return; }
   if (!S) { $('#app').innerHTML = '<div class="spinner"></div>'; navEl.style.display = 'none'; return; }
-  navEl.style.display = '';
+  navEl.style.display = mode === 'tasks' ? 'none' : '';
   const views = { home: viewHome, bet: viewBet, board: viewBoard, create: viewCreate, join: viewJoin, settings: viewSettings, friends: viewFriends };
+  const nOpen = tasksOpenToday();
   $('#app').innerHTML = `<header><div class="logo"><img src="/icon.svg" alt="">BetFriends</div>
-    <button class="me" onclick="go('settings')">${av(S.me, 'sm')} ${esc(U(S.me).name)}</button></header>` + (views[view.name] || viewHome)();
+    <div class="hright"><button class="me" onclick="setMode('bets');go('settings')">${av(S.me, 'sm')} ${esc(U(S.me).name)}</button>
+    <div class="segctl modesw"><button class="${mode === 'bets' ? 'on' : ''}" onclick="setMode('bets')">Wetten</button><button class="${mode === 'tasks' ? 'on' : ''}" onclick="setMode('tasks')">Aufgaben${nOpen && mode !== 'tasks' ? ` <i class="dot">${nOpen}</i>` : ''}</button></div></div></header>`
+    + (mode === 'tasks' ? viewTasks() : (views[view.name] || viewHome)());
   const tabs = [['home', 'Wetten'], ['board', 'Community'], ['create', 'Neu'], ['join', 'Beitreten'], ['settings', 'Einstellungen']];
   const cur = view.name === 'bet' ? 'home' : view.name === 'friends' ? 'board' : view.name;
   $('#nav').innerHTML = tabs.map(([n, l]) => `<button class="${cur === n ? 'on' : ''}" onclick="go('${n}')">${ICONS[n]}${l}</button>`).join('');
