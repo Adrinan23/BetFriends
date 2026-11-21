@@ -93,6 +93,23 @@ function applyTheme() {
 mq?.addEventListener?.('change', applyTheme);
 
 /* ===================== Laden & Aktionen ===================== */
+// Grüner Ring ums Häkchen; liegt über der Seite, damit ein Neuzeichnen ihn nicht abschneidet
+function ringAt(ids) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  for (const id of ids) {
+    const el = document.querySelector(`.check[data-bet="${id}"]`); if (!el) continue;
+    const r = el.getBoundingClientRect(), d = document.createElement('div');
+    d.className = 'ringfx'; Object.assign(d.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+    document.body.appendChild(d); setTimeout(() => d.remove(), 700);
+  }
+}
+// Belohnung beim Abhaken: kurze Leiste mit Punkten (Variante C)
+function reward(n, sub) {
+  const el = $('#reward');
+  el.innerHTML = `<span class="rcoin"></span><span><b>+${n}</b> Punkte<small>${esc(sub)}</small></span>`;
+  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+  clearTimeout(reward.t); reward.t = setTimeout(() => el.classList.remove('show'), 2200);
+}
 function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2400); }
 
 async function refresh() {
@@ -130,11 +147,16 @@ function toggleCheck(betId) {
   if (!p) return;
   if (p.checks[TODAY]) {
     const f = S.feed.find(f => f.betId === betId && f.userId === S.me && f.kind === 'check' && ds(new Date(f.ts)) === TODAY);
-    p.checks[TODAY] = false; render();
+    p.checks[TODAY] = false; render(); $('#reward').classList.remove('show');
     run(() => api.uncheck(betId, S.me, TODAY, f?.id), 'Abhaken zurückgenommen');
   } else {
-    p.checks[TODAY] = true; view.pop = betId; render(); view.pop = null;
-    run(() => api.check(betId, S.me, TODAY), `Erledigt. ${pStatus(b, p).streak} Tage am Stück`);
+    p.checks[TODAY] = true; view.pop = betId; render(); view.pop = null; ringAt([betId]);
+    const before = S.points, streak = pStatus(b, p).streak;
+    run(() => api.check(betId, S.me, TODAY).then(() => true)).then(ok => {
+      if (!ok) return;
+      const gain = S.points - before;
+      gain > 0 ? reward(gain, `${streak} Tage Serie, weiter so`) : toast(`Erledigt. ${streak} Tage am Stück`);
+    });
   }
 }
 function checkAll() {
@@ -142,8 +164,13 @@ function checkAll() {
     .map(b => ({ b, p: b.participants.find(p => p.userId === S.me) }))
     .filter(x => x.p && !pStatus(x.b, x.p).out && !x.p.checks[TODAY]);
   if (!open.length) return;
-  open.forEach(x => { x.p.checks[TODAY] = true; }); render();
-  run(async () => { for (const x of open) await api.check(x.b.id, S.me, TODAY); }, `${open.length} Challenges abgehakt`);
+  open.forEach(x => { x.p.checks[TODAY] = true; }); view.pop = open.map(x => x.b.id); render(); view.pop = null; ringAt(open.map(x => x.b.id));
+  const before = S.points;
+  run(async () => { for (const x of open) await api.check(x.b.id, S.me, TODAY); return true; }).then(ok => {
+    if (!ok) return;
+    const gain = S.points - before;
+    gain > 0 ? reward(gain, `${open.length} Challenges abgehakt`) : toast(`${open.length} Challenges abgehakt`);
+  });
 }
 function react(fid, emo) {
   const f = S.feed.find(x => x.id === fid); const on = !(f.reacts[emo] || []).includes(S.me);
@@ -261,7 +288,7 @@ function viewHome() {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
       <h2>Heute</h2><div style="display:flex;gap:6px;align-items:center">${left > 1 ? `<button class="btn sec2 sm" onclick="checkAll()">Alle abhaken</button>` : ''}<span class="tag ${left ? 'warn' : 'ok'}">${left ? left + ' offen' : 'Alles erledigt'}</span></div></div>
     ${todos.map(({ b, p }) => `<div class="todo">
-      <button class="check ${p.checks[TODAY] ? 'on' : ''} ${view.pop === b.id ? 'pop' : ''}" onclick="toggleCheck('${b.id}')" aria-label="Abhaken">${p.checks[TODAY] ? '✓' : ''}</button>
+      <button class="check ${p.checks[TODAY] ? 'on' : ''} ${[].concat(view.pop).includes(b.id) ? 'pop' : ''}" data-bet="${b.id}" onclick="toggleCheck('${b.id}')" aria-label="Abhaken">${p.checks[TODAY] ? '✓' : ''}</button>
       <div style="flex:1;cursor:pointer" onclick="go('bet',{id:'${b.id}'})"><div style="font-weight:500">${esc(p.goal)}</div><div class="sub">${esc(b.title)} · ${pStatus(b, p).streak} Tage Serie</div></div>
     </div>`).join('')}
   </div>` : ''}
